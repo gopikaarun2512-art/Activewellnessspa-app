@@ -6,9 +6,9 @@ export async function GET() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    let executionsRaw = [];
-    let executionsFiltered = [];
-    let error = null;
+    let executionsRaw: any[] = [];
+    let executionsFiltered: any[] = [];
+    let error: string | null = null;
 
     try {
       // Get executions before filtering
