@@ -314,12 +314,18 @@ export class AnalyticsAggregator {
     });
 
     // Convert VAPI calls to activities (if not already in n8n data)
+    // Also merge VAPI summary into existing n8n activities if they don't have one
     vapiCalls.forEach(call => {
-      // Skip if we already have this call from n8n
-      const exists = activities.find(a => a.phone === call.phoneNumber &&
+      // Check if we already have this call from n8n
+      const existingActivity = activities.find(a => a.phone === call.phoneNumber &&
         Math.abs(new Date(a.time).getTime() - new Date(call.startedAt).getTime()) < 60000);
 
-      if (!exists) {
+      if (existingActivity) {
+        // Merge VAPI summary into existing activity if it doesn't have one
+        if (!existingActivity.callSummary && call.summary) {
+          existingActivity.callSummary = call.summary;
+        }
+      } else {
         const rawOutcome = (call.outcome || call.status || '').toLowerCase();
         const outcome: Activity['outcome'] = outcomeMap[rawOutcome] || 'other';
 
@@ -330,6 +336,7 @@ export class AnalyticsAggregator {
           phone: call.phoneNumber,
           leadName: call.leadName || 'Unknown',
           outcome,
+          callSummary: call.summary, // Include VAPI call summary
         });
       }
     });

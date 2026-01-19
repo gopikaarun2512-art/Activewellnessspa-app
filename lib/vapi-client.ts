@@ -124,8 +124,14 @@ export class VAPIClient {
       leadName = `${raw.customer.firstName || ''} ${raw.customer.lastName || ''}`.trim();
     }
 
-    // Extract summary from artifact
-    const summary = raw.artifact?.summary || raw.artifact?.analysis?.summary || '';
+    // Extract summary from artifact - check multiple possible locations
+    // VAPI stores summaries in different places depending on configuration
+    const summary =
+      raw.artifact?.summary ||                      // Primary: artifact.summary
+      raw.artifact?.analysis?.summary ||            // Fallback: artifact.analysis.summary
+      raw.analysis?.summary ||                      // Fallback: analysis.summary
+      raw.summary ||                                // Fallback: top-level summary
+      '';
 
     return {
       id: raw.id,
