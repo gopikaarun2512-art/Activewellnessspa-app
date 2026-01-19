@@ -176,24 +176,8 @@ export class N8NClient {
       limit: 1000,
     });
 
-    // Enrich executions with workflow names (fetch on-demand)
-    await Promise.all(
-      executions.map(async (exec) => {
-        if (!exec.workflowName && exec.workflowId) {
-          exec.workflowName = await this.getWorkflowName(exec.workflowId);
-        }
-      })
-    );
-
-    // Filter for call-related and lead-related workflows
-    return executions.filter(exec =>
-      exec.workflowName?.toLowerCase().includes('call') ||
-      exec.workflowName?.toLowerCase().includes('vapi') ||
-      exec.workflowName?.toLowerCase().includes('phone') ||
-      exec.workflowName?.toLowerCase().includes('validation') ||
-      exec.workflowName?.toLowerCase().includes('lead') ||
-      exec.workflowName?.toLowerCase().includes('facebook')
-    );
+    // Return all executions for now (workflow filtering done client-side if needed)
+    return executions;
   }
 
   // Get queued/running executions (calls in progress or waiting)
@@ -207,24 +191,8 @@ export class N8NClient {
       limit: 500,
     });
 
-    // Enrich executions with workflow names (fetch on-demand)
-    await Promise.all(
-      executions.map(async (exec) => {
-        if (!exec.workflowName && exec.workflowId) {
-          exec.workflowName = await this.getWorkflowName(exec.workflowId);
-        }
-      })
-    );
-
-    // Filter for call-related and lead-related workflows that are currently running or queued
-    return executions.filter(exec =>
-      exec.workflowName?.toLowerCase().includes('call') ||
-      exec.workflowName?.toLowerCase().includes('vapi') ||
-      exec.workflowName?.toLowerCase().includes('phone') ||
-      exec.workflowName?.toLowerCase().includes('validation') ||
-      exec.workflowName?.toLowerCase().includes('lead') ||
-      exec.workflowName?.toLowerCase().includes('facebook')
-    );
+    // Return all running executions for now
+    return executions;
   }
 }
 
