@@ -54,13 +54,14 @@ export class VAPIClient {
     if (raw.id && !this.debugLogged) {
       console.log('VAPI Raw Call Data Sample:', JSON.stringify({
         id: raw.id,
-        hasArtifact: !!raw.artifact,
-        artifactKeys: raw.artifact ? Object.keys(raw.artifact) : [],
-        hasSummary: !!raw.artifact?.summary,
-        hasAnalysis: !!raw.analysis,
-        analysisKeys: raw.analysis ? Object.keys(raw.analysis) : [],
-        hasMessages: !!raw.artifact?.messages,
-        messagesCount: raw.artifact?.messages?.length || 0,
+        // Summary is at TOP LEVEL (primary location)
+        hasTopLevelSummary: !!raw.summary,
+        topLevelSummaryPreview: raw.summary ? raw.summary.substring(0, 100) + '...' : null,
+        // Also in analysis.summary
+        hasAnalysisSummary: !!raw.analysis?.summary,
+        analysisSummaryPreview: raw.analysis?.summary ? raw.analysis.summary.substring(0, 100) + '...' : null,
+        // Legacy locations (for reference)
+        hasArtifactSummary: !!raw.artifact?.summary,
       }, null, 2));
       this.debugLogged = true;
     }
@@ -140,18 +141,19 @@ export class VAPIClient {
     }
 
     // Extract summary from VAPI - check all possible locations
-    // VAPI stores summaries in the artifact object after call completion
+    // Based on actual VAPI API response: summary is at TOP LEVEL (raw.summary)
+    // and also in raw.analysis.summary - NOT in artifact.summary
     let summary = '';
 
-    // Primary locations for summary
-    if (raw.artifact?.summary) {
-      summary = raw.artifact.summary;
-    } else if (raw.analysis?.summary) {
-      summary = raw.analysis.summary;
-    } else if (raw.summary) {
+    // PRIMARY: Top-level summary (this is where VAPI actually stores it!)
+    if (raw.summary) {
       summary = raw.summary;
     }
-    // Check structuredOutputs for summary (some assistants output it here)
+    // SECONDARY: analysis.summary (also contains the summary)
+    else if (raw.analysis?.summary) {
+      summary = raw.analysis.summary;
+    }
+    // FALLBACK: Check structuredOutputs for summary (some assistants output it here)
     else if (structuredOutputs.summary?.result) {
       summary = structuredOutputs.summary.result;
     }
@@ -159,12 +161,16 @@ export class VAPIClient {
     else if (structuredOutputs.conversation_summary?.result) {
       summary = structuredOutputs.conversation_summary.result;
     }
-    // Fallback: Check analysis.structuredData for summary
+    // Last resort: Check analysis.structuredData for summary
     else if (raw.analysis?.structuredData?.summary) {
       summary = raw.analysis.structuredData.summary;
     }
     else if (raw.analysis?.structuredData?.conversation_summary) {
       summary = raw.analysis.structuredData.conversation_summary;
+    }
+    // Legacy fallback: artifact.summary (in case older API versions used this)
+    else if (raw.artifact?.summary) {
+      summary = raw.artifact.summary;
     }
 
     return {
