@@ -73,13 +73,26 @@ export class N8NClient {
     return data.data || [];
   }
 
-  private async populateWorkflowCache(): Promise<void> {
-    if (this.workflowCache.size > 0) return; // Already populated
+  async getWorkflow(id: string): Promise<{ id: string; name: string }> {
+    const data = await this.fetch(`/workflows/${id}`);
+    return { id: data.id, name: data.name };
+  }
 
-    const workflows = await this.listWorkflows();
-    workflows.forEach(workflow => {
-      this.workflowCache.set(workflow.id, workflow.name);
-    });
+  private async getWorkflowName(workflowId: string): Promise<string> {
+    // Check cache first
+    if (this.workflowCache.has(workflowId)) {
+      return this.workflowCache.get(workflowId)!;
+    }
+
+    // Fetch individual workflow to get name
+    try {
+      const workflow = await this.getWorkflow(workflowId);
+      this.workflowCache.set(workflowId, workflow.name);
+      return workflow.name;
+    } catch (e) {
+      console.error(`Failed to fetch workflow ${workflowId}:`, e);
+      return '';
+    }
   }
 
   private mapExecution(raw: any): N8NExecution {
@@ -157,21 +170,20 @@ export class N8NClient {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Populate workflow cache with names
-    await this.populateWorkflowCache();
-
     const executions = await this.listExecutions({
       status: 'success',
       startedAfter: today.toISOString(),
       limit: 1000,
     });
 
-    // Enrich executions with workflow names from cache
-    executions.forEach(exec => {
-      if (!exec.workflowName && exec.workflowId) {
-        exec.workflowName = this.workflowCache.get(exec.workflowId) || '';
-      }
-    });
+    // Enrich executions with workflow names (fetch on-demand)
+    await Promise.all(
+      executions.map(async (exec) => {
+        if (!exec.workflowName && exec.workflowId) {
+          exec.workflowName = await this.getWorkflowName(exec.workflowId);
+        }
+      })
+    );
 
     // Filter for call-related and lead-related workflows
     return executions.filter(exec =>
@@ -189,21 +201,20 @@ export class N8NClient {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Populate workflow cache with names
-    await this.populateWorkflowCache();
-
     const executions = await this.listExecutions({
       status: 'running',
       startedAfter: today.toISOString(),
       limit: 500,
     });
 
-    // Enrich executions with workflow names from cache
-    executions.forEach(exec => {
-      if (!exec.workflowName && exec.workflowId) {
-        exec.workflowName = this.workflowCache.get(exec.workflowId) || '';
-      }
-    });
+    // Enrich executions with workflow names (fetch on-demand)
+    await Promise.all(
+      executions.map(async (exec) => {
+        if (!exec.workflowName && exec.workflowId) {
+          exec.workflowName = await this.getWorkflowName(exec.workflowId);
+        }
+      })
+    );
 
     // Filter for call-related and lead-related workflows that are currently running or queued
     return executions.filter(exec =>
