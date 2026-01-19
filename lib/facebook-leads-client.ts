@@ -67,7 +67,7 @@ export class FacebookLeadsClient {
       const fullExecutions = await Promise.all(
         data.data.map(async (exec: any) => {
           try {
-            return await this.fetchN8N(`/executions/${exec.id}`);
+            return await this.fetchN8N(`/executions/${exec.id}?includeData=true`);
           } catch (e) {
             console.error(`Failed to fetch execution ${exec.id}:`, e);
             return null;
@@ -128,6 +128,7 @@ export class FacebookLeadsClient {
 
                   // Extract standard Facebook lead fields
                   if (json.id) leadData.id = json.id;
+                  if (json.lead_id) leadData.id = json.lead_id; // Normalize node uses lead_id
                   if (json.form_id) leadData.formId = json.form_id;
                   if (json.formId) leadData.formId = json.formId;
                   if (json.form_name) leadData.formName = json.form_name;
@@ -143,6 +144,8 @@ export class FacebookLeadsClient {
                   }
                   if (json.email) leadData.email = json.email;
                   if (json.phone) leadData.phone = json.phone;
+                  if (json.phone_raw) leadData.phone = json.phone_raw; // Normalize node uses phone_raw
+                  if (json.phone_e164) leadData.phone = json.phone_e164; // Also save E.164 format
                   if (json.phone_number) leadData.phone = json.phone_number;
 
                   // Extract ad info
@@ -157,6 +160,7 @@ export class FacebookLeadsClient {
 
                   // Extract source
                   if (json.source) leadData.source = json.source;
+                  if (json.ad_source) leadData.source = json.ad_source; // Normalize node uses ad_source
 
                   // Collect custom fields
                   if (json.field_data || json.customFields) {
