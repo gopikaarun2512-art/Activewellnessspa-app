@@ -11,6 +11,7 @@ interface N8NExecutionsResponse {
 export class N8NClient {
   private baseUrl: string;
   private apiKey: string;
+  private workflowCache: Map<string, string> = new Map(); // workflowId -> workflowName
 
   constructor() {
     this.baseUrl = N8N_API_URL;
@@ -26,6 +27,7 @@ export class N8NClient {
         'Accept': 'application/json',
         ...options.headers,
       },
+      cache: 'no-store', // Disable Next.js caching for large responses
     });
 
     if (!response.ok) {
@@ -61,6 +63,15 @@ export class N8NClient {
   async listWorkflows(): Promise<any[]> {
     const data = await this.fetch('/workflows');
     return data.data || [];
+  }
+
+  private async populateWorkflowCache(): Promise<void> {
+    if (this.workflowCache.size > 0) return; // Already populated
+
+    const workflows = await this.listWorkflows();
+    workflows.forEach(workflow => {
+      this.workflowCache.set(workflow.id, workflow.name);
+    });
   }
 
   private mapExecution(raw: any): N8NExecution {
@@ -138,18 +149,30 @@ export class N8NClient {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Populate workflow cache with names
+    await this.populateWorkflowCache();
+
     const executions = await this.listExecutions({
       status: 'success',
       startedAfter: today.toISOString(),
       limit: 1000,
     });
 
-    // Filter for call-related workflows
+    // Enrich executions with workflow names from cache
+    executions.forEach(exec => {
+      if (!exec.workflowName && exec.workflowId) {
+        exec.workflowName = this.workflowCache.get(exec.workflowId) || '';
+      }
+    });
+
+    // Filter for call-related and lead-related workflows
     return executions.filter(exec =>
       exec.workflowName?.toLowerCase().includes('call') ||
       exec.workflowName?.toLowerCase().includes('vapi') ||
       exec.workflowName?.toLowerCase().includes('phone') ||
-      exec.workflowName?.toLowerCase().includes('validation')
+      exec.workflowName?.toLowerCase().includes('validation') ||
+      exec.workflowName?.toLowerCase().includes('lead') ||
+      exec.workflowName?.toLowerCase().includes('facebook')
     );
   }
 
@@ -158,18 +181,30 @@ export class N8NClient {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Populate workflow cache with names
+    await this.populateWorkflowCache();
+
     const executions = await this.listExecutions({
       status: 'running',
       startedAfter: today.toISOString(),
       limit: 500,
     });
 
-    // Filter for call-related workflows that are currently running or queued
+    // Enrich executions with workflow names from cache
+    executions.forEach(exec => {
+      if (!exec.workflowName && exec.workflowId) {
+        exec.workflowName = this.workflowCache.get(exec.workflowId) || '';
+      }
+    });
+
+    // Filter for call-related and lead-related workflows that are currently running or queued
     return executions.filter(exec =>
       exec.workflowName?.toLowerCase().includes('call') ||
       exec.workflowName?.toLowerCase().includes('vapi') ||
       exec.workflowName?.toLowerCase().includes('phone') ||
-      exec.workflowName?.toLowerCase().includes('validation')
+      exec.workflowName?.toLowerCase().includes('validation') ||
+      exec.workflowName?.toLowerCase().includes('lead') ||
+      exec.workflowName?.toLowerCase().includes('facebook')
     );
   }
 }
