@@ -1,18 +1,15 @@
 import { FacebookLead } from '@/types/analytics';
 
-const FACEBOOK_LEADS_PATH = process.env.FACEBOOK_LEADS_PATH || '';
 const N8N_API_URL = process.env.N8N_API_URL || '';
 const N8N_API_KEY = process.env.N8N_API_KEY || '';
 
 export class FacebookLeadsClient {
   private n8nBaseUrl: string;
   private apiKey: string;
-  private leadsPath: string;
 
   constructor() {
     this.n8nBaseUrl = N8N_API_URL;
     this.apiKey = N8N_API_KEY;
-    this.leadsPath = FACEBOOK_LEADS_PATH;
   }
 
   private async fetchN8N(endpoint: string, options: RequestInit = {}) {
