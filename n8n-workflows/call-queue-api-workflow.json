@@ -1,0 +1,169 @@
+{
+  "name": "Call Queue API - Dashboard Integration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "call-queue-api",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "call-queue-api"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.QUEUE_SPREADSHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "queue",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": {
+            "values": {
+              "headerRow": 1
+            }
+          }
+        }
+      },
+      "id": "google-sheets-read",
+      "name": "Read Queue Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter to only return queued/pending calls\nconst allRows = $input.all();\n\n// Filter for queued status only\nconst queuedCalls = allRows.filter(item => {\n  const status = (item.json.status || '').toLowerCase();\n  return status === 'queued' || status === 'pending' || status === 'scheduled';\n});\n\n// Map to the expected format for the dashboard\nconst formattedCalls = queuedCalls.map(item => {\n  const row = item.json;\n  \n  // Build lead name\n  const firstName = row.firstName || '';\n  const lastName = row.lastName || '';\n  const leadName = [firstName, lastName].filter(Boolean).join(' ') || 'Unknown';\n  \n  // Determine call type\n  const typeField = (row['inbound/outbound'] || 'outbound').toLowerCase();\n  const callType = typeField === 'inbound' ? 'inbound' : 'outbound';\n  \n  // Parse priority\n  let priority = 'medium';\n  if (row.priority) {\n    priority = row.priority.toLowerCase();\n  }\n  \n  // Get queued time\n  const queuedAt = row.scheduled_call_time || row.execution_time || row.created_at || new Date().toISOString();\n  \n  // Build workflow/source name\n  const source = row.source || '';\n  const campaignType = row.campaign_type || '';\n  const workflowName = [source, campaignType].filter(Boolean).join(', ') || null;\n  \n  return {\n    json: {\n      id: row.queue_id,\n      phone: row.phone_e164,\n      leadName: leadName,\n      type: callType,\n      queuedAt: queuedAt,\n      estimatedCallTime: row.scheduled_call_time || null,\n      priority: priority,\n      workflowName: workflowName,\n      // Additional fields for reference\n      status: row.status,\n      email: row.email || null,\n      contactId: row.contact_id || null,\n      opportunityId: row.opportunity_id || null,\n      attempts: parseInt(row.attempts) || 0,\n      vapiCallId: row.vapi_call_id || null,\n      callOutcome: row.call_outcome || null,\n      batchPosition: parseInt(row.batch_position) || null\n    }\n  };\n});\n\n// Sort by priority (high > medium > low) then by queued time\nconst priorityOrder = { high: 0, medium: 1, low: 2 };\n\nformattedCalls.sort((a, b) => {\n  const priorityA = priorityOrder[a.json.priority] || 1;\n  const priorityB = priorityOrder[b.json.priority] || 1;\n  \n  if (priorityA !== priorityB) {\n    return priorityA - priorityB;\n  }\n  \n  return new Date(a.json.queuedAt).getTime() - new Date(b.json.queuedAt).getTime();\n});\n\nreturn formattedCalls;"
+      },
+      "id": "code-transform",
+      "name": "Transform & Filter Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: $json.message || 'Failed to fetch queue data', data: [] } }}",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [650, 500]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Queue Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Queue Sheet": {
+      "main": [
+        [
+          {
+            "node": "Transform & Filter Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform & Filter Queue": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "dashboard",
+      "createdAt": "2026-01-19T00:00:00.000Z",
+      "updatedAt": "2026-01-19T00:00:00.000Z"
+    },
+    {
+      "name": "api",
+      "createdAt": "2026-01-19T00:00:00.000Z",
+      "updatedAt": "2026-01-19T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-01-19T00:00:00.000Z",
+  "versionId": "1"
+}

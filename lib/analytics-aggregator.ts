@@ -1,6 +1,7 @@
 import { n8nClient } from './n8n-client';
 import { vapiClient } from './vapi-client';
 import { facebookLeadsClient } from './facebook-leads-client';
+import { queueClient } from './queue-client';
 import {
   DashboardData,
   DashboardMetrics,
@@ -15,11 +16,24 @@ import { format } from 'date-fns';
 export class AnalyticsAggregator {
   async getDashboardData(): Promise<DashboardData> {
     // Fetch data from all sources in parallel
-    const [n8nExecutions, vapiCalls, queuedExecutions, facebookLeads] = await Promise.all([
-      n8nClient.getTodaysCallData().catch(() => []),
-      vapiClient.getTodaysCalls().catch(() => []),
-      n8nClient.getQueuedCalls().catch(() => []),
-      facebookLeadsClient.getTodaysLeads().catch(() => []),
+    // Primary queue source: Google Sheet via n8n webhook (with fallback)
+    const [n8nExecutions, vapiCalls, sheetQueuedCalls, facebookLeads] = await Promise.all([
+      n8nClient.getTodaysCallData().catch((err) => {
+        console.error('Failed to fetch n8n executions:', err);
+        return [];
+      }),
+      vapiClient.getTodaysCalls().catch((err) => {
+        console.error('Failed to fetch VAPI calls:', err);
+        return [];
+      }),
+      queueClient.getQueuedCalls().catch((err) => {
+        console.error('Failed to fetch queue from sheet:', err);
+        return [];
+      }),
+      facebookLeadsClient.getTodaysLeads().catch((err) => {
+        console.error('Failed to fetch Facebook leads:', err);
+        return [];
+      }),
     ]);
 
     // Combine and aggregate data
@@ -27,7 +41,10 @@ export class AnalyticsAggregator {
     const callVolume = this.calculateCallVolume(vapiCalls);
     const outcomes = this.calculateOutcomes(vapiCalls);
     const recentActivity = this.getRecentActivity(n8nExecutions, vapiCalls);
-    const queuedCalls = this.getQueuedCalls(queuedExecutions);
+
+    // Use Google Sheet queue data as primary source
+    // Sort by priority (high first) then by queued time
+    const queuedCalls = this.sortQueuedCalls(sheetQueuedCalls);
 
     return {
       metrics,
@@ -38,6 +55,26 @@ export class AnalyticsAggregator {
       facebookLeads,
       lastUpdated: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Sort queued calls by priority (high > medium > low) then by queued time
+   */
+  private sortQueuedCalls(calls: QueuedCall[]): QueuedCall[] {
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+
+    return calls.sort((a, b) => {
+      // First sort by priority
+      const priorityA = priorityOrder[a.priority || 'medium'];
+      const priorityB = priorityOrder[b.priority || 'medium'];
+
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+
+      // Then sort by queued time (earliest first)
+      return new Date(a.queuedAt).getTime() - new Date(b.queuedAt).getTime();
+    });
   }
 
   private calculateMetrics(n8nExecutions: any[], vapiCalls: any[]): DashboardMetrics {
@@ -223,41 +260,6 @@ export class AnalyticsAggregator {
       .slice(0, 20);
   }
 
-  private getQueuedCalls(queuedExecutions: any[]): QueuedCall[] {
-    const queuedCalls: QueuedCall[] = [];
-
-    queuedExecutions.forEach(execution => {
-      // Determine call type from workflow name or data
-      let callType: 'inbound' | 'outbound' = 'outbound';
-      if (execution.workflowName?.toLowerCase().includes('inbound')) {
-        callType = 'inbound';
-      }
-      if (execution.data.callType) {
-        callType = execution.data.callType;
-      }
-
-      // Build lead name
-      let leadName = 'Unknown';
-      if (execution.data.firstName || execution.data.lastName) {
-        leadName = `${execution.data.firstName || ''} ${execution.data.lastName || ''}`.trim();
-      }
-
-      queuedCalls.push({
-        id: execution.id,
-        phone: execution.data.phone || 'N/A',
-        leadName,
-        type: callType,
-        queuedAt: execution.startedAt,
-        priority: 'medium', // Default priority
-        workflowName: execution.workflowName,
-      });
-    });
-
-    // Sort by queued time (earliest first)
-    return queuedCalls.sort((a, b) =>
-      new Date(a.queuedAt).getTime() - new Date(b.queuedAt).getTime()
-    );
-  }
 }
 
 export const analyticsAggregator = new AnalyticsAggregator();
