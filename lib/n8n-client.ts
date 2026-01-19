@@ -47,12 +47,20 @@ export class N8NClient {
 
     if (params.workflowId) queryParams.append('workflowId', params.workflowId);
     if (params.status) queryParams.append('status', params.status);
-    if (params.startedAfter) queryParams.append('startedAfter', params.startedAfter);
+    // Note: startedAfter is not supported by n8n API, we'll filter client-side
     if (params.limit) queryParams.append('limit', params.limit.toString());
 
     const data: N8NExecutionsResponse = await this.fetch(`/executions?${queryParams}`);
 
-    return data.data.map(this.mapExecution);
+    let executions = data.data.map(this.mapExecution);
+
+    // Filter by startedAfter client-side if provided
+    if (params.startedAfter) {
+      const filterDate = new Date(params.startedAfter);
+      executions = executions.filter(exec => new Date(exec.startedAt) >= filterDate);
+    }
+
+    return executions;
   }
 
   async getExecution(id: string): Promise<N8NExecution> {
