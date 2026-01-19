@@ -45,34 +45,16 @@ export class FacebookLeadsClient {
         return [];
       }
 
-      // First, get all workflows to find Facebook leads workflow
-      const workflows = await this.fetchN8N('/workflows');
+      // Known Facebook Lead workflow ID
+      const facebookWorkflowId = 'Gz4UxfzFByeh04nv';
 
-      if (!workflows.data || !Array.isArray(workflows.data)) {
-        console.log('No workflows found');
-        return [];
-      }
-
-      // Find Facebook leads workflow
-      const facebookWorkflow = workflows.data.find((wf: any) => {
-        const name = wf.name?.toLowerCase() || '';
-        return name.includes('facebook') || name.includes('fb lead');
-      });
-
-      if (!facebookWorkflow) {
-        console.log('No Facebook leads workflow found');
-        return [];
-      }
-
-      console.log(`Found Facebook leads workflow: ${facebookWorkflow.name} (ID: ${facebookWorkflow.id})`);
+      console.log(`Fetching executions for Facebook leads workflow ID: ${facebookWorkflowId}`);
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Fetch executions using workflow-specific endpoint
-      console.log(`Fetching executions for workflow ID: ${facebookWorkflow.id}`);
-
-      const data = await this.fetchN8N(`/workflows/${facebookWorkflow.id}/executions?limit=100`);
+      // Fetch executions using the standard executions endpoint with workflowId filter
+      const data = await this.fetchN8N(`/executions?workflowId=${facebookWorkflowId}&limit=100`);
 
       if (!data.data || !Array.isArray(data.data)) {
         console.log('No execution data returned');
@@ -81,10 +63,23 @@ export class FacebookLeadsClient {
 
       console.log(`Found ${data.data.length} executions for Facebook leads workflow`);
 
+      // Fetch full execution data for each execution (includes runData)
+      const fullExecutions = await Promise.all(
+        data.data.map(async (exec: any) => {
+          try {
+            return await this.fetchN8N(`/executions/${exec.id}`);
+          } catch (e) {
+            console.error(`Failed to fetch execution ${exec.id}:`, e);
+            return null;
+          }
+        })
+      );
+
       // Extract lead data from executions
       const facebookLeads: FacebookLead[] = [];
 
-      data.data.forEach((execution: any) => {
+      fullExecutions.forEach((execution: any) => {
+        if (!execution) return;
         const lead = this.extractLeadFromExecution(execution);
         if (lead) {
           facebookLeads.push(lead);
