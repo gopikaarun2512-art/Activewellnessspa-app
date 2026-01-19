@@ -50,6 +50,21 @@ export class VAPIClient {
   }
 
   private mapCall(raw: any): VAPICall {
+    // Debug: Log raw VAPI data to understand structure (only first call)
+    if (raw.id && !this.debugLogged) {
+      console.log('VAPI Raw Call Data Sample:', JSON.stringify({
+        id: raw.id,
+        hasArtifact: !!raw.artifact,
+        artifactKeys: raw.artifact ? Object.keys(raw.artifact) : [],
+        hasSummary: !!raw.artifact?.summary,
+        hasAnalysis: !!raw.analysis,
+        analysisKeys: raw.analysis ? Object.keys(raw.analysis) : [],
+        hasMessages: !!raw.artifact?.messages,
+        messagesCount: raw.artifact?.messages?.length || 0,
+      }, null, 2));
+      this.debugLogged = true;
+    }
+
     // Determine call type (from VAPI Status Handler: inboundPhoneCall vs outboundPhoneCall)
     let type: 'inbound' | 'outbound' = 'outbound';
     if (raw.type === 'inbound' || raw.type === 'inboundPhoneCall') {
@@ -124,14 +139,33 @@ export class VAPIClient {
       leadName = `${raw.customer.firstName || ''} ${raw.customer.lastName || ''}`.trim();
     }
 
-    // Extract summary from artifact - check multiple possible locations
-    // VAPI stores summaries in different places depending on configuration
-    const summary =
-      raw.artifact?.summary ||                      // Primary: artifact.summary
-      raw.artifact?.analysis?.summary ||            // Fallback: artifact.analysis.summary
-      raw.analysis?.summary ||                      // Fallback: analysis.summary
-      raw.summary ||                                // Fallback: top-level summary
-      '';
+    // Extract summary from VAPI - check all possible locations
+    // VAPI stores summaries in the artifact object after call completion
+    let summary = '';
+
+    // Primary locations for summary
+    if (raw.artifact?.summary) {
+      summary = raw.artifact.summary;
+    } else if (raw.analysis?.summary) {
+      summary = raw.analysis.summary;
+    } else if (raw.summary) {
+      summary = raw.summary;
+    }
+    // Check structuredOutputs for summary (some assistants output it here)
+    else if (structuredOutputs.summary?.result) {
+      summary = structuredOutputs.summary.result;
+    }
+    // Check for conversation_summary in structured outputs
+    else if (structuredOutputs.conversation_summary?.result) {
+      summary = structuredOutputs.conversation_summary.result;
+    }
+    // Fallback: Check analysis.structuredData for summary
+    else if (raw.analysis?.structuredData?.summary) {
+      summary = raw.analysis.structuredData.summary;
+    }
+    else if (raw.analysis?.structuredData?.conversation_summary) {
+      summary = raw.analysis.structuredData.conversation_summary;
+    }
 
     return {
       id: raw.id,
@@ -146,6 +180,8 @@ export class VAPIClient {
       summary,
     };
   }
+
+  private debugLogged = false;
 
   // Get calls for a specific date range
   async getCalls(startDate: Date, endDate: Date): Promise<VAPICall[]> {
