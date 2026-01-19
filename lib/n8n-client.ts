@@ -125,12 +125,18 @@ export class N8NClient {
                   if (item.json.lead_score !== undefined) executionData.leadScore = item.json.lead_score;
                   if (item.json.leadScore !== undefined) executionData.leadScore = item.json.leadScore;
 
-                  // Extract booking status
+                  // Extract booking status - check all possible fields from workflows
                   if (item.json.booked !== undefined) executionData.booked = item.json.booked;
+                  if (item.json.booking_requested !== undefined) executionData.bookingRequested = item.json.booking_requested;
+                  if (item.json.is_booked !== undefined) executionData.isBooked = item.json.is_booked;
 
-                  // Extract outcome
+                  // Extract outcome - prioritize call_outcome from VAPI Status Handler
                   if (item.json.outcome) executionData.outcome = item.json.outcome;
                   if (item.json.call_outcome) executionData.outcome = item.json.call_outcome;
+
+                  // Extract interest level from VAPI structured outputs
+                  if (item.json.interest_level) executionData.interestLevel = item.json.interest_level;
+                  if (item.json.service_interest) executionData.serviceInterest = item.json.service_interest;
 
                   // Extract link sent status
                   if (item.json.linkSent !== undefined) executionData.linkSent = item.json.linkSent;
@@ -165,19 +171,33 @@ export class N8NClient {
     };
   }
 
-  // Get today's executions for specific workflows
+  // Get executions for a specific date range
+  async getCallData(startDate: Date, endDate: Date): Promise<N8NExecution[]> {
+    // n8n API limit is 250 max
+    const executions = await this.listExecutions({
+      status: 'success',
+      startedAfter: startDate.toISOString(),
+      limit: 250,
+    });
+
+    // Filter by end date client-side (n8n API doesn't have startedBefore param)
+    const filtered = executions.filter(exec => {
+      const execDate = new Date(exec.startedAt);
+      return execDate >= startDate && execDate <= endDate;
+    });
+
+    return filtered;
+  }
+
+  // Get today's executions for specific workflows (legacy method for backward compatibility)
   async getTodaysCallData(): Promise<N8NExecution[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const executions = await this.listExecutions({
-      status: 'success',
-      startedAfter: today.toISOString(),
-      limit: 1000,
-    });
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
 
-    // Return all executions for now (workflow filtering done client-side if needed)
-    return executions;
+    return this.getCallData(today, endOfToday);
   }
 
   // Get queued/running executions (calls in progress or waiting)
@@ -185,10 +205,11 @@ export class N8NClient {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // n8n API limit is 250 max
     const executions = await this.listExecutions({
       status: 'running',
       startedAfter: today.toISOString(),
-      limit: 500,
+      limit: 250,
     });
 
     // Return all running executions for now

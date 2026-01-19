@@ -6,25 +6,31 @@ import { gamificationCalculator } from '@/lib/gamification';
 export const dynamic = 'force-dynamic';
 
 // Cache the data for 1 minute to reduce API calls
-let cachedData: any = null;
-let cacheTime: number = 0;
+// Cache is keyed by date range
+const cacheStore: Map<string, { data: any; time: number }> = new Map();
 const CACHE_DURATION = 60 * 1000; // 1 minute
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const dateRange = searchParams.get('dateRange') || 'today';
     const now = Date.now();
 
+    // Create cache key based on date range
+    const cacheKey = `dashboard-${dateRange}`;
+    const cached = cacheStore.get(cacheKey);
+
     // Return cached data if still fresh
-    if (cachedData && (now - cacheTime) < CACHE_DURATION) {
+    if (cached && (now - cached.time) < CACHE_DURATION) {
       return NextResponse.json({
-        ...cachedData,
+        ...cached.data,
         cached: true,
-        cacheAge: Math.floor((now - cacheTime) / 1000),
+        cacheAge: Math.floor((now - cached.time) / 1000),
       });
     }
 
-    // Fetch fresh data
-    const dashboardData = await analyticsAggregator.getDashboardData();
+    // Fetch fresh data with date range
+    const dashboardData = await analyticsAggregator.getDashboardData(dateRange);
 
     // Calculate gamification data
     // In a real app, you'd fetch total calls from a database
@@ -40,9 +46,8 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     };
 
-    // Update cache
-    cachedData = response;
-    cacheTime = now;
+    // Update cache with date range key
+    cacheStore.set(cacheKey, { data: response, time: now });
 
     return NextResponse.json(response);
   } catch (error) {

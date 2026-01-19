@@ -31,13 +31,15 @@ function DashboardContent() {
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange>('today');
   const { showToast } = useToast();
 
-  const fetchData = useCallback(async (isRefresh = false) => {
+  const fetchData = useCallback(async (isRefresh = false, dateRange?: DateRange) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
       }
 
-      const response = await fetch('/api/analytics/dashboard');
+      // Use provided dateRange or fall back to selected state
+      const range = dateRange || selectedDateRange;
+      const response = await fetch(`/api/analytics/dashboard?dateRange=${range}`);
       if (!response.ok) throw new Error('Failed to fetch data');
 
       const result = await response.json();
@@ -55,7 +57,7 @@ function DashboardContent() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [selectedDateRange]);
 
   useEffect(() => {
     fetchData();
@@ -132,12 +134,12 @@ function DashboardContent() {
     setSearchQuery(query);
   }, []);
 
-  // Handle date range change
+  // Handle date range change - triggers new API call with selected range
   const handleDateRangeChange = useCallback((range: DateRange) => {
     setSelectedDateRange(range);
-    // In a real app, this would trigger a new API call with the date range
-    // For now, we'll just update the state
-  }, []);
+    // Fetch data with new date range
+    fetchData(true, range);
+  }, [fetchData]);
 
   if (loading) {
     return (

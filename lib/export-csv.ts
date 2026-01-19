@@ -10,9 +10,18 @@ export function exportActivityToCSV(activities: Activity[], filename: string = '
     'Email',
     'Outcome',
     'Lead Score',
-    'Link Sent',
     'Call Summary',
   ];
+
+  // Outcome labels for CSV export
+  const outcomeLabels: Record<string, string> = {
+    booked: 'Booked (GymMaster)',
+    linkSent: 'Link Sent',
+    noAnswer: 'No Answer',
+    voicemail: 'Voicemail',
+    notInterested: 'Not Interested',
+    other: 'Other',
+  };
 
   const rows = activities.map(activity => [
     format(new Date(activity.time), 'yyyy-MM-dd HH:mm:ss'),
@@ -20,9 +29,8 @@ export function exportActivityToCSV(activities: Activity[], filename: string = '
     activity.leadName,
     activity.phone,
     activity.email || '',
-    activity.outcome,
+    outcomeLabels[activity.outcome] || activity.outcome,
     activity.leadScore?.toString() || '',
-    activity.linkSent ? 'Yes' : 'No',
     activity.callSummary ? `"${activity.callSummary.replace(/"/g, '""')}"` : '',
   ]);
 

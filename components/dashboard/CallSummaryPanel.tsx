@@ -33,6 +33,7 @@ export default function CallSummaryPanel({
 
   // Get outcome counts
   const bookedCount = outcomes.find(o => o.type === 'booked')?.count || 0;
+  const linkSentCount = outcomes.find(o => o.type === 'linkSent')?.count || 0;
   const noAnswerCount = outcomes.find(o => o.type === 'noAnswer')?.count || 0;
   const voicemailCount = outcomes.find(o => o.type === 'voicemail')?.count || 0;
   const notInterestedCount = outcomes.find(o => o.type === 'notInterested')?.count || 0;
@@ -41,6 +42,7 @@ export default function CallSummaryPanel({
   const getOutcomeColor = (type: string) => {
     const colors = {
       booked: 'text-wellness-success-600 dark:text-wellness-success-400 bg-wellness-success-50 dark:bg-wellness-success-900/20',
+      linkSent: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20',
       noAnswer: 'text-wellness-warning-600 dark:text-wellness-warning-400 bg-wellness-warning-50 dark:bg-wellness-warning-900/20',
       voicemail: 'text-wellness-blue-600 dark:text-wellness-blue-400 bg-wellness-blue-50 dark:bg-wellness-blue-900/20',
       notInterested: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800',
@@ -153,10 +155,14 @@ export default function CallSummaryPanel({
               </svg>
               Outcomes
             </h3>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div className={`px-2 py-1.5 rounded ${getOutcomeColor('booked')}`}>
                 <div className="text-xs font-medium">Booked</div>
                 <div className="text-lg font-bold">{bookedCount}</div>
+              </div>
+              <div className={`px-2 py-1.5 rounded ${getOutcomeColor('linkSent')}`}>
+                <div className="text-xs font-medium">Link Sent</div>
+                <div className="text-lg font-bold">{linkSentCount}</div>
               </div>
               <div className={`px-2 py-1.5 rounded ${getOutcomeColor('noAnswer')}`}>
                 <div className="text-xs font-medium">No Answer</div>
@@ -169,6 +175,10 @@ export default function CallSummaryPanel({
               <div className={`px-2 py-1.5 rounded ${getOutcomeColor('notInterested')}`}>
                 <div className="text-xs font-medium">Not Interested</div>
                 <div className="text-lg font-bold">{notInterestedCount}</div>
+              </div>
+              <div className={`px-2 py-1.5 rounded ${getOutcomeColor('other')}`}>
+                <div className="text-xs font-medium">Other</div>
+                <div className="text-lg font-bold">{otherCount}</div>
               </div>
             </div>
           </div>

@@ -14,20 +14,22 @@ interface CallOutcomesChartProps {
   data: CallOutcome[];
 }
 
-const COLORS = {
-  booked: '#43A047', // wellness success green
+const COLORS: Record<string, string> = {
+  booked: '#16a34a', // bright green for GymMaster confirmed bookings
+  linkSent: '#8b5cf6', // purple for booking link sent (interested but not confirmed)
   noAnswer: '#FB8C00', // wellness warning orange
   voicemail: '#0288D1', // wellness blue
   notInterested: '#ef4444', // red
   other: '#9ca3af', // gray
 };
 
-const LABELS = {
-  booked: 'Booked',
+const LABELS: Record<string, string> = {
+  booked: 'Booked (GymMaster)', // Actually booked in GymMaster (is_booked === true)
+  linkSent: 'Link Sent',        // booking_link_sent = lead interested, link sent (not confirmed)
   noAnswer: 'No Answer',
   voicemail: 'Voicemail',
   notInterested: 'Not Interested',
-  other: 'Other',
+  other: 'Other',               // includes callback_requested
 };
 
 export default function CallOutcomesChart({ data }: CallOutcomesChartProps) {

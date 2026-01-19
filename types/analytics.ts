@@ -16,7 +16,7 @@ export interface CallVolumeData {
 }
 
 export interface CallOutcome {
-  type: 'booked' | 'noAnswer' | 'voicemail' | 'notInterested' | 'other';
+  type: 'booked' | 'linkSent' | 'noAnswer' | 'voicemail' | 'notInterested' | 'other';
   count: number;
   percentage: number;
 }
@@ -27,10 +27,9 @@ export interface Activity {
   type: 'inbound' | 'outbound';
   phone: string;
   leadName: string;
-  outcome: 'booked' | 'noAnswer' | 'voicemail' | 'notInterested' | 'other';
+  outcome: 'booked' | 'linkSent' | 'noAnswer' | 'voicemail' | 'notInterested' | 'other';
   leadScore?: number;
   email?: string;
-  linkSent?: boolean;
   callSummary?: string;
 }
 
@@ -65,14 +64,18 @@ export interface N8NExecution {
   data: {
     phone?: string;
     callType?: 'inbound' | 'outbound';
-    outcome?: string;
+    outcome?: string; // booking_link_sent, not_interested, no_answer, voicemail, busy, wrong_number, callback_requested
     leadScore?: number;
     booked?: boolean;
+    bookingRequested?: boolean; // From VAPI structured outputs
+    isBooked?: boolean; // From GymMaster check
     firstName?: string;
     lastName?: string;
     email?: string;
     linkSent?: boolean;
     callSummary?: string;
+    interestLevel?: string; // From VAPI structured outputs
+    serviceInterest?: string; // From VAPI structured outputs
   };
 }
 
@@ -82,10 +85,11 @@ export interface VAPICall {
   phoneNumber: string;
   duration: number;
   status: 'completed' | 'failed' | 'no-answer' | 'voicemail';
-  outcome?: string;
+  outcome?: string; // booking_link_sent, not_interested, no_answer, voicemail, busy, wrong_number, callback_requested
   startedAt: string;
   endedAt?: string;
   leadName?: string;
+  summary?: string; // Call summary from VAPI artifact
 }
 
 export interface FacebookLead {

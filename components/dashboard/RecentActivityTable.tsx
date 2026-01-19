@@ -7,16 +7,22 @@ interface RecentActivityTableProps {
 
 export default function RecentActivityTable({ activities }: RecentActivityTableProps) {
   const getOutcomeBadge = (outcome: Activity['outcome']) => {
-    const styles = {
-      booked: 'bg-wellness-success-100 text-wellness-success-800 dark:bg-wellness-success-900/30 dark:text-wellness-success-400',
+    const styles: Record<string, string> = {
+      booked: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+      linkSent: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
       noAnswer: 'bg-wellness-warning-100 text-wellness-warning-800 dark:bg-wellness-warning-900/30 dark:text-wellness-warning-400',
       voicemail: 'bg-wellness-blue-100 text-wellness-blue-800 dark:bg-wellness-blue-900/30 dark:text-wellness-blue-400',
       notInterested: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
       other: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
     };
 
-    const labels = {
-      booked: 'Booked',
+    // Labels:
+    // - booked = GymMaster confirmed booking (is_booked === true)
+    // - linkSent = booking_link_sent (lead interested, link sent but NOT confirmed in GymMaster)
+    // - other = callback_requested, unknown outcomes
+    const labels: Record<string, string> = {
+      booked: 'Booked (GymMaster)',
+      linkSent: 'Link Sent',
       noAnswer: 'No Answer',
       voicemail: 'Voicemail',
       notInterested: 'Not Interested',
@@ -24,8 +30,8 @@ export default function RecentActivityTable({ activities }: RecentActivityTableP
     };
 
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[outcome]}`}>
-        {labels[outcome]}
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[outcome] || styles.other}`}>
+        {labels[outcome] || 'Other'}
       </span>
     );
   };

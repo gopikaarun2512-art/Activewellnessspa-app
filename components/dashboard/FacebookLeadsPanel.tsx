@@ -180,7 +180,7 @@ export default function FacebookLeadsPanel({ facebookLeads }: FacebookLeadsPanel
               </div>
 
               {/* Custom Fields (if any) */}
-              {lead.customFields && Object.keys(lead.customFields).length > 0 && (
+              {lead.customFields && Array.isArray(lead.customFields) && lead.customFields.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
                   <details className="group">
                     <summary className="cursor-pointer text-xs font-medium text-wellness-600 dark:text-wellness-400 hover:text-wellness-700 dark:hover:text-wellness-300 flex items-center gap-1">
@@ -190,12 +190,14 @@ export default function FacebookLeadsPanel({ facebookLeads }: FacebookLeadsPanel
                       View custom fields
                     </summary>
                     <div className="mt-2 space-y-1 pl-4">
-                      {Object.entries(lead.customFields).map(([key, value]) => (
-                        <div key={key} className="flex items-start gap-2 text-xs">
+                      {lead.customFields.map((field: { name: string; values?: string[] }, index: number) => (
+                        <div key={field.name || index} className="flex items-start gap-2 text-xs">
                           <span className="font-medium text-gray-600 dark:text-gray-400 min-w-[80px]">
-                            {key}:
+                            {field.name}:
                           </span>
-                          <span className="text-gray-900 dark:text-white">{value}</span>
+                          <span className="text-gray-900 dark:text-white">
+                            {Array.isArray(field.values) ? field.values.join(', ') : String(field.values || '')}
+                          </span>
                         </div>
                       ))}
                     </div>

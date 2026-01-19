@@ -32,9 +32,9 @@ export class FacebookLeadsClient {
   }
 
   /**
-   * Get today's Facebook leads from n8n workflow executions
+   * Get Facebook leads for a specific date range from n8n workflow executions
    */
-  async getTodaysLeads(): Promise<FacebookLead[]> {
+  async getLeads(startDate: Date, endDate: Date): Promise<FacebookLead[]> {
     try {
       // Check if n8n API is configured
       if (!this.n8nBaseUrl || !this.apiKey) {
@@ -42,16 +42,14 @@ export class FacebookLeadsClient {
         return [];
       }
 
-      // Known Facebook Lead workflow ID
-      const facebookWorkflowId = 'Gz4UxfzFByeh04nv';
+      // Known Facebook Lead workflow ID (1.Facebook Lead Capture depulication check)
+      const facebookWorkflowId = '9gbmNOvmObqSIe8u';
 
       console.log(`Fetching executions for Facebook leads workflow ID: ${facebookWorkflowId}`);
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
       // Fetch executions using the standard executions endpoint with workflowId filter
-      const data = await this.fetchN8N(`/executions?workflowId=${facebookWorkflowId}&limit=100`);
+      // n8n API max limit is 250
+      const data = await this.fetchN8N(`/executions?workflowId=${facebookWorkflowId}&limit=250`);
 
       if (!data.data || !Array.isArray(data.data)) {
         console.log('No execution data returned');
@@ -85,17 +83,16 @@ export class FacebookLeadsClient {
 
       console.log(`Extracted ${facebookLeads.length} Facebook leads`);
 
-      // Filter to today's leads only (client-side)
-      const todaysLeads = facebookLeads.filter((lead) => {
+      // Filter to date range (client-side)
+      const filteredLeads = facebookLeads.filter((lead) => {
         const leadDate = new Date(lead.createdTime);
-        leadDate.setHours(0, 0, 0, 0);
-        return leadDate.getTime() >= today.getTime();
+        return leadDate >= startDate && leadDate <= endDate;
       });
 
-      console.log(`Filtered to ${todaysLeads.length} leads from today`);
+      console.log(`Filtered to ${filteredLeads.length} leads in date range`);
 
       // Sort by created time (most recent first)
-      return todaysLeads.sort((a, b) =>
+      return filteredLeads.sort((a, b) =>
         new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime()
       );
     } catch (error) {
@@ -105,7 +102,21 @@ export class FacebookLeadsClient {
   }
 
   /**
+   * Get today's Facebook leads from n8n workflow executions (legacy method for backward compatibility)
+   */
+  async getTodaysLeads(): Promise<FacebookLead[]> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    return this.getLeads(today, endOfToday);
+  }
+
+  /**
    * Extract Facebook lead data from n8n execution
+   * Priority: Look for "Normalize Lead Data" node first as it has the complete lead info
    */
   private extractLeadFromExecution(execution: any): FacebookLead | null {
     try {
@@ -114,70 +125,109 @@ export class FacebookLeadsClient {
 
       let leadData: any = {};
 
-      // Search through all nodes for Facebook lead data
-      Object.values(runData).forEach((nodeRuns: any) => {
-        if (Array.isArray(nodeRuns)) {
-          nodeRuns.forEach((run: any) => {
-            if (run.data?.main?.[0]) {
-              run.data.main[0].forEach((item: any) => {
-                if (item.json) {
-                  const json = item.json;
+      // Priority 1: Look for "Normalize Lead Data (Phone + Attribution)" node
+      // This node has the complete, normalized lead data
+      const normalizeNodeName = 'Normalize Lead Data (Phone + Attribution)';
+      if (runData[normalizeNodeName]) {
+        const nodeRuns = runData[normalizeNodeName];
+        if (nodeRuns?.[0]?.data?.main?.[0]?.[0]?.json) {
+          const json = nodeRuns[0].data.main[0][0].json;
 
-                  // Extract standard Facebook lead fields
-                  if (json.id) leadData.id = json.id;
-                  if (json.lead_id) leadData.id = json.lead_id; // Normalize node uses lead_id
-                  if (json.form_id) leadData.formId = json.form_id;
-                  if (json.formId) leadData.formId = json.formId;
-                  if (json.form_name) leadData.formName = json.form_name;
-                  if (json.formName) leadData.formName = json.formName;
-                  if (json.created_time) leadData.createdTime = json.created_time;
-                  if (json.createdTime) leadData.createdTime = json.createdTime;
-
-                  // Extract contact info
-                  if (json.name) leadData.name = json.name;
-                  if (json.full_name) leadData.name = json.full_name;
-                  if (json.firstName && json.lastName) {
-                    leadData.name = `${json.firstName} ${json.lastName}`.trim();
-                  }
-                  if (json.email) leadData.email = json.email;
-                  if (json.phone) leadData.phone = json.phone;
-                  if (json.phone_raw) leadData.phone = json.phone_raw; // Normalize node uses phone_raw
-                  if (json.phone_e164) leadData.phone = json.phone_e164; // Also save E.164 format
-                  if (json.phone_number) leadData.phone = json.phone_number;
-
-                  // Extract ad info
-                  if (json.ad_id) leadData.adId = json.ad_id;
-                  if (json.adId) leadData.adId = json.adId;
-                  if (json.ad_name) leadData.adName = json.ad_name;
-                  if (json.adName) leadData.adName = json.adName;
-
-                  // Extract status
-                  if (json.status) leadData.status = json.status;
-                  if (json.lead_status) leadData.status = json.lead_status;
-
-                  // Extract source
-                  if (json.source) leadData.source = json.source;
-                  if (json.ad_source) leadData.source = json.ad_source; // Normalize node uses ad_source
-
-                  // Collect custom fields
-                  if (json.field_data || json.customFields) {
-                    leadData.customFields = json.field_data || json.customFields;
-                  }
-                }
-              });
-            }
-          });
+          leadData.id = json.lead_id || json.id;
+          leadData.formId = json.form_id;
+          leadData.formName = json.form_name;
+          leadData.createdTime = json.created_time;
+          leadData.name = json.full_name || `${json.firstName || ''} ${json.lastName || ''}`.trim();
+          leadData.firstName = json.firstName;
+          leadData.lastName = json.lastName;
+          leadData.email = json.email;
+          leadData.phone = json.phone_raw || json.phone_e164;
+          leadData.adId = json.ad_id;
+          leadData.adName = json.ad_name;
+          leadData.source = json.ad_source;
+          leadData.queueId = json.queue_id;
         }
-      });
+      }
 
-      // Validate required fields
+      // Priority 2: Look for "Parse GymMaster Response" node for booking status
+      const gymMasterNodeName = 'Parse GymMaster Response';
+      if (runData[gymMasterNodeName]) {
+        const nodeRuns = runData[gymMasterNodeName];
+        if (nodeRuns?.[0]?.data?.main?.[0]?.[0]?.json) {
+          const json = nodeRuns[0].data.main[0][0].json;
+          leadData.isMember = json.is_member;
+          leadData.isBooked = json.is_booked;
+          leadData.memberId = json.member_id;
+        }
+      }
+
+      // Priority 3: Check "Get Lead Details" node for field_data (custom fields)
+      const getLeadDetailsNodeName = 'Get Lead Details';
+      if (runData[getLeadDetailsNodeName]) {
+        const nodeRuns = runData[getLeadDetailsNodeName];
+        if (nodeRuns?.[0]?.data?.main?.[0]?.[0]?.json) {
+          const json = nodeRuns[0].data.main[0][0].json;
+          if (json.field_data) {
+            leadData.customFields = json.field_data;
+          }
+        }
+      }
+
+      // Fallback: Search through all nodes if we don't have required data
       if (!leadData.id || !leadData.name) {
+        Object.entries(runData).forEach(([nodeName, nodeRuns]: [string, any]) => {
+          if (Array.isArray(nodeRuns)) {
+            nodeRuns.forEach((run: any) => {
+              if (run.data?.main?.[0]) {
+                run.data.main[0].forEach((item: any) => {
+                  if (item.json) {
+                    const json = item.json;
+
+                    // Only set if not already set (priority to specific nodes above)
+                    if (!leadData.id && (json.lead_id || json.id)) {
+                      leadData.id = json.lead_id || json.id;
+                    }
+                    if (!leadData.name) {
+                      if (json.full_name) leadData.name = json.full_name;
+                      else if (json.firstName || json.lastName) {
+                        leadData.name = `${json.firstName || ''} ${json.lastName || ''}`.trim();
+                      }
+                    }
+                    if (!leadData.email && json.email) leadData.email = json.email;
+                    if (!leadData.phone && (json.phone_raw || json.phone_e164 || json.phone)) {
+                      leadData.phone = json.phone_raw || json.phone_e164 || json.phone;
+                    }
+                    if (!leadData.formId && json.form_id) leadData.formId = json.form_id;
+                    if (!leadData.formName && json.form_name) leadData.formName = json.form_name;
+                    if (!leadData.createdTime && json.created_time) leadData.createdTime = json.created_time;
+                    if (!leadData.adId && json.ad_id) leadData.adId = json.ad_id;
+                    if (!leadData.adName && json.ad_name) leadData.adName = json.ad_name;
+                    if (!leadData.source && json.ad_source) leadData.source = json.ad_source;
+                    if (!leadData.customFields && json.field_data) leadData.customFields = json.field_data;
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+
+      // Validate required fields - use execution ID as fallback for lead ID
+      if (!leadData.name) {
         return null;
+      }
+
+      // Determine status based on GymMaster check
+      let status: FacebookLead['status'] = 'new';
+      if (leadData.isBooked === true) {
+        status = 'booked';
+      } else if (leadData.isMember === true) {
+        status = 'qualified'; // Member but not booked
       }
 
       // Build Facebook lead object
       const lead: FacebookLead = {
-        id: leadData.id || execution.id,
+        id: String(leadData.id || execution.id),
         formId: leadData.formId || 'unknown',
         formName: leadData.formName,
         createdTime: leadData.createdTime || execution.startedAt,
@@ -186,8 +236,8 @@ export class FacebookLeadsClient {
         phone: leadData.phone,
         adId: leadData.adId,
         adName: leadData.adName,
-        status: this.normalizeStatus(leadData.status),
-        source: leadData.source || 'facebook_ad',
+        status,
+        source: this.normalizeSource(leadData.source),
         customFields: leadData.customFields,
       };
 
@@ -196,6 +246,18 @@ export class FacebookLeadsClient {
       console.error('Error extracting lead from execution:', error);
       return null;
     }
+  }
+
+  /**
+   * Normalize source to one of the defined types
+   */
+  private normalizeSource(source?: string): FacebookLead['source'] {
+    if (!source) return 'facebook_ad';
+
+    const normalized = source.toLowerCase();
+    if (normalized.includes('page')) return 'facebook_page';
+
+    return 'facebook_ad';
   }
 
   /**

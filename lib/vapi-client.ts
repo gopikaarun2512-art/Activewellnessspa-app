@@ -50,22 +50,61 @@ export class VAPIClient {
   }
 
   private mapCall(raw: any): VAPICall {
-    // Determine call type
+    // Determine call type (from VAPI Status Handler: inboundPhoneCall vs outboundPhoneCall)
     let type: 'inbound' | 'outbound' = 'outbound';
     if (raw.type === 'inbound' || raw.type === 'inboundPhoneCall') {
       type = 'inbound';
     }
 
+    // Map endedReason to normalized outcome (matching VAPI Status Handler workflow)
+    // Workflow normalizes: customer-busy -> busy, customer-ended-call -> no_answer,
+    // voicemail -> voicemail, no-answer -> no_answer, customer-did-not-answer -> no_answer
+    const endedReasonMap: Record<string, string> = {
+      'customer-busy': 'busy',
+      'customer-ended-call': 'no_answer',
+      'assistant-ended-call': 'no_answer',
+      'voicemail': 'voicemail',
+      'no-answer': 'no_answer',
+      'customer-did-not-answer': 'no_answer',
+      'assistant-did-not-answer': 'no_answer',
+    };
+
     // Map status
     let status: 'completed' | 'failed' | 'no-answer' | 'voicemail' = 'completed';
-    if (raw.endedReason === 'customer-did-not-answer') status = 'no-answer';
+    if (raw.endedReason === 'customer-did-not-answer' || raw.endedReason === 'no-answer') status = 'no-answer';
     else if (raw.endedReason === 'voicemail') status = 'voicemail';
     else if (raw.status === 'failed' || raw.status === 'error') status = 'failed';
 
-    // Extract outcome from analysis or messages
-    let outcome = status;
-    if (raw.analysis?.structuredData?.outcome) {
+    // Extract outcome - check structuredOutputs first (where VAPI Status Handler looks)
+    // Then check analysis.structuredData, then use endedReason mapping
+    let outcome: string = status;
+
+    // Check artifact.structuredOutputs (primary source from VAPI end-of-call-report)
+    const structuredOutputs = raw.artifact?.structuredOutputs || {};
+
+    // The workflow uses specific UUIDs for structured outputs, but we can also check generic 'result' or 'outcome'
+    const outcomeFromStructured =
+      structuredOutputs['1e5fcbc0-665c-40cb-8c4d-7f0b3a4f4f40']?.result || // specific UUID from workflow
+      structuredOutputs.outcome?.result ||
+      structuredOutputs.result;
+
+    if (outcomeFromStructured) {
+      outcome = outcomeFromStructured;
+    } else if (raw.analysis?.structuredData?.outcome) {
       outcome = raw.analysis.structuredData.outcome;
+    } else if (raw.endedReason && endedReasonMap[raw.endedReason]) {
+      outcome = endedReasonMap[raw.endedReason];
+    }
+
+    // Extract booking_requested flag from structured outputs
+    const bookingRequested =
+      structuredOutputs['48ace4eb-93a3-464e-a28e-9b1ff410aa64']?.result || // specific UUID from workflow
+      structuredOutputs.booking_requested?.result ||
+      false;
+
+    // If booking was requested, set outcome to booking_link_sent
+    if (bookingRequested === true) {
+      outcome = 'booking_link_sent';
     }
 
     // Calculate duration
@@ -73,13 +112,20 @@ export class VAPIClient {
       ? Math.floor((new Date(raw.endedAt).getTime() - new Date(raw.startedAt).getTime()) / 1000)
       : 0;
 
-    // Extract lead name from customer data
+    // Extract lead name from customer data or assistantOverrides
     let leadName = '';
+    const overrides = raw.assistantOverrides?.variableValues || {};
+
     if (raw.customer?.name) {
       leadName = raw.customer.name;
+    } else if (overrides.firstName || overrides.lastName) {
+      leadName = `${overrides.firstName || ''} ${overrides.lastName || ''}`.trim();
     } else if (raw.customer?.firstName || raw.customer?.lastName) {
       leadName = `${raw.customer.firstName || ''} ${raw.customer.lastName || ''}`.trim();
     }
+
+    // Extract summary from artifact
+    const summary = raw.artifact?.summary || raw.artifact?.analysis?.summary || '';
 
     return {
       id: raw.id,
@@ -91,22 +137,28 @@ export class VAPIClient {
       startedAt: raw.startedAt || raw.createdAt,
       endedAt: raw.endedAt,
       leadName,
+      summary,
     };
   }
 
-  // Get today's calls
+  // Get calls for a specific date range
+  async getCalls(startDate: Date, endDate: Date): Promise<VAPICall[]> {
+    return this.listCalls({
+      createdAtGt: startDate.toISOString(),
+      createdAtLt: endDate.toISOString(),
+      limit: 1000,
+    });
+  }
+
+  // Get today's calls (legacy method for backward compatibility)
   async getTodaysCalls(): Promise<VAPICall[]> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
 
-    return this.listCalls({
-      createdAtGt: today.toISOString(),
-      createdAtLt: tomorrow.toISOString(),
-      limit: 1000,
-    });
+    return this.getCalls(today, endOfToday);
   }
 }
 
