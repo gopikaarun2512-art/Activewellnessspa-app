@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { analyticsAggregator } from '@/lib/analytics-aggregator';
 import { gamificationCalculator } from '@/lib/gamification';
 
+// Force dynamic rendering on Vercel (required for external API calls)
+export const dynamic = 'force-dynamic';
+
 // Cache the data for 1 minute to reduce API calls
 let cachedData: any = null;
 let cacheTime: number = 0;

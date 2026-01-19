@@ -21,7 +21,7 @@ export class FacebookLeadsClient {
         'Accept': 'application/json',
         ...options.headers,
       },
-      cache: 'no-store', // Disable Next.js caching for large responses
+      next: { revalidate: 0 }, // Disable caching, works better with Vercel
     });
 
     if (!response.ok) {

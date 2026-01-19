@@ -67,7 +67,7 @@ export class QueueClient {
         headers: {
           'Accept': 'application/json',
         },
-        cache: 'no-store',
+        next: { revalidate: 0 }, // Disable caching, works better with Vercel
       });
 
       if (!response.ok) {
@@ -118,7 +118,7 @@ export class QueueClient {
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${QUEUE_SPREADSHEET_ID}/values/${QUEUE_SHEET_NAME}?key=${GOOGLE_SHEETS_API_KEY}`;
 
       const response = await fetch(url, {
-        cache: 'no-store',
+        next: { revalidate: 0 }, // Disable caching, works better with Vercel
       });
 
       if (!response.ok) {
