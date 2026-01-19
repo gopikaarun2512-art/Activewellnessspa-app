@@ -1,0 +1,265 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Active Wellness Light Theme - Warm Neutrals & Rich Rust */
+  --background: #ECE3DC;
+  --foreground: #5B241F;
+
+  /* Wellness Colors - Rust & Cream Palette */
+  --wellness-primary: #B44C45;
+  --wellness-primary-light: #FDF5F4;
+  --wellness-primary-dark: #8B372F;
+
+  --wellness-secondary: #ECE3DC;
+  --wellness-secondary-light: #FDFCFB;
+
+  --wellness-success: #6BA76B;
+  --wellness-warning: #B54E47;
+  --wellness-error: #A34139;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Active Wellness Dark Theme */
+    --background: #2A1D1A;
+    --foreground: #ECE3DC;
+
+    /* Wellness Colors (adjusted for dark mode) */
+    --wellness-primary: #E9A39B;
+    --wellness-primary-light: #5B241F;
+    --wellness-primary-dark: #F4D1CD;
+
+    --wellness-secondary: #C8B3A3;
+    --wellness-secondary-light: #6B5F52;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for webkit browsers */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--wellness-primary-light);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wellness-primary);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--wellness-primary-dark);
+}
+
+/* Dark mode scrollbar */
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-track {
+    background: #1E1E1E;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--wellness-primary);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--wellness-primary-dark);
+  }
+}
+
+/* Selection styling */
+::selection {
+  background-color: var(--wellness-primary);
+  color: white;
+}
+
+::-moz-selection {
+  background-color: var(--wellness-primary);
+  color: white;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Wellness gradient backgrounds */
+@layer components {
+  .wellness-gradient-bg {
+    background: linear-gradient(135deg, #FDF5F4 0%, #ECE3DC 50%, #F9F7F5 100%);
+  }
+
+  .wellness-gradient-bg-dark {
+    background: linear-gradient(135deg, #5B241F 0%, #2A1D1A 50%, #6B5F52 100%);
+  }
+
+  /* Premium glassmorphism card */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow:
+      0 8px 32px 0 rgba(180, 76, 69, 0.08),
+      0 2px 8px 0 rgba(180, 76, 69, 0.04),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+  }
+
+  .glass-card-dark {
+    background: rgba(42, 29, 26, 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(236, 227, 220, 0.1);
+    box-shadow:
+      0 8px 32px 0 rgba(0, 0, 0, 0.4),
+      0 2px 8px 0 rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 0 rgba(236, 227, 220, 0.05);
+  }
+
+  /* Premium shadow system */
+  .shadow-premium {
+    box-shadow:
+      0 2px 4px -1px rgba(180, 76, 69, 0.06),
+      0 4px 8px -1px rgba(180, 76, 69, 0.1);
+  }
+
+  .shadow-premium-lg {
+    box-shadow:
+      0 10px 25px -5px rgba(180, 76, 69, 0.1),
+      0 8px 10px -6px rgba(180, 76, 69, 0.1),
+      0 0 0 1px rgba(180, 76, 69, 0.05);
+  }
+
+  .shadow-premium-xl {
+    box-shadow:
+      0 20px 50px -12px rgba(180, 76, 69, 0.25),
+      0 10px 20px -8px rgba(180, 76, 69, 0.15),
+      0 0 0 1px rgba(180, 76, 69, 0.05);
+  }
+
+  /* Smooth hover elevation */
+  .hover-lift {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 20px 50px -12px rgba(180, 76, 69, 0.25),
+      0 10px 20px -8px rgba(180, 76, 69, 0.15);
+  }
+
+  /* Shimmer loading effect */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.2) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Premium gradient text */
+  .gradient-text {
+    background: linear-gradient(135deg, #B44C45 0%, #E9A39B 50%, #B44C45 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    background-size: 200% auto;
+    animation: gradient-shift 3s ease infinite;
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Remove transition from transform for performance */
+*:not(.hover-lift) {
+  transition-property: background-color, border-color, color, opacity, box-shadow;
+}
+
+/* Premium focus styles */
+*:focus-visible {
+  outline: 2px solid #B44C45;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Smooth page transitions */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Stagger animations for lists */
+.stagger-item {
+  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+.stagger-item:nth-child(1) { animation-delay: 0.05s; }
+.stagger-item:nth-child(2) { animation-delay: 0.1s; }
+.stagger-item:nth-child(3) { animation-delay: 0.15s; }
+.stagger-item:nth-child(4) { animation-delay: 0.2s; }
+.stagger-item:nth-child(5) { animation-delay: 0.25s; }
+.stagger-item:nth-child(6) { animation-delay: 0.3s; }
