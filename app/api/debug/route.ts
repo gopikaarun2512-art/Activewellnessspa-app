@@ -8,8 +8,6 @@ export async function GET() {
 
     let executionsRaw = [];
     let executionsFiltered = [];
-    let workflowsCount = 0;
-    let sampleWorkflowNames: string[] = [];
     let error = null;
 
     try {
@@ -24,11 +22,6 @@ export async function GET() {
       // Get filtered call data
       const callData = await n8nClient.getTodaysCallData();
       executionsFiltered = callData;
-
-      // Get workflow names
-      const workflows = await n8nClient.listWorkflows();
-      workflowsCount = workflows.length;
-      sampleWorkflowNames = workflows.slice(0, 5).map((w: any) => w.name);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Unknown error';
     }
@@ -42,9 +35,12 @@ export async function GET() {
         todayStart: today.toISOString(),
         executionsRaw: executionsRaw.length,
         executionsFiltered: executionsFiltered.length,
-        workflowsCount,
-        sampleWorkflowNames,
         sampleExecutions: executionsRaw.slice(0, 3).map((e: any) => ({
+          id: e.id,
+          workflowId: e.workflowId,
+          workflowName: e.workflowName,
+        })),
+        filteredExecutions: executionsFiltered.slice(0, 3).map((e: any) => ({
           id: e.id,
           workflowId: e.workflowId,
           workflowName: e.workflowName,
