@@ -1,8 +1,8 @@
 'use client';
 
-import { format } from 'date-fns';
 import SearchBar from './SearchBar';
 import DateRangeFilter, { DateRange } from './DateRangeFilter';
+import { formatDateAWST, formatShortTimeAWST, getNowInAWST } from '@/lib/timezone';
 
 interface DashboardHeaderProps {
   lastUpdated: Date | null;
@@ -31,14 +31,14 @@ export default function DashboardHeader({
           </h1>
           <div className="flex items-center gap-3 mt-3">
             <p className="text-lg text-white/95 dark:text-gray-400 font-medium">
-              {format(new Date(), 'EEEE, MMMM d, yyyy')}
+              {formatDateAWST(getNowInAWST())}
             </p>
             {lastUpdated && (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-white/60 dark:bg-gray-700" />
                 <p className="text-sm text-white/85 dark:text-gray-500 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                  Updated {format(lastUpdated, 'h:mm a')}
+                  Updated {formatShortTimeAWST(lastUpdated)} AWST
                 </p>
               </>
             )}

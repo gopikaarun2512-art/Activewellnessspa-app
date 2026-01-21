@@ -2,6 +2,7 @@ import { n8nClient } from './n8n-client';
 import { vapiClient } from './vapi-client';
 import { facebookLeadsClient } from './facebook-leads-client';
 import { queueClient } from './queue-client';
+import { getCurrentHourInAWST, AWST_OFFSET_MS } from './timezone';
 // GymMaster client available for future use (e.g., displaying total gym bookings separately)
 // import { gymMasterClient, GymMasterBookingSummary } from './gymmaster-client';
 import {
@@ -13,43 +14,91 @@ import {
   QueuedCall,
   FacebookLead,
 } from '@/types/analytics';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { subDays } from 'date-fns';
 
 export type DateRangeType = 'today' | 'yesterday' | 'last7days' | 'last30days';
 
 /**
+ * Get the AWST noon reset boundaries in UTC
+ * The "day" runs from 12:00 PM AWST to 12:00 PM AWST next day
+ * Returns proper UTC timestamps for API calls
+ */
+function getAWSTDayBoundaries(): { startDate: Date; endDate: Date } {
+  const now = new Date();
+  const currentHourAWST = getCurrentHourInAWST();
+
+  // Calculate today's noon in AWST, then convert to UTC
+  // AWST noon = UTC 04:00 (12:00 - 8 hours)
+  const todayUTC = new Date(now);
+  todayUTC.setUTCHours(4, 0, 0, 0); // 12:00 AWST = 04:00 UTC
+
+  let startDate: Date;
+  let endDate: Date = now;
+
+  if (currentHourAWST >= 12) {
+    // After noon AWST - day started today at noon AWST (04:00 UTC)
+    startDate = todayUTC;
+  } else {
+    // Before noon AWST - day started yesterday at noon AWST
+    startDate = new Date(todayUTC.getTime() - 24 * 60 * 60 * 1000);
+  }
+
+  return { startDate, endDate };
+}
+
+/**
  * Get start and end dates based on date range filter
+ * Returns proper UTC timestamps for API calls
  */
 function getDateRange(range: DateRangeType): { startDate: Date; endDate: Date } {
   const now = new Date();
+  const currentHourAWST = getCurrentHourInAWST();
+
+  // Today's noon in UTC (AWST noon = UTC 04:00)
+  const todayNoonUTC = new Date(now);
+  todayNoonUTC.setUTCHours(4, 0, 0, 0);
 
   switch (range) {
     case 'today':
+      return getAWSTDayBoundaries();
+
+    case 'yesterday': {
+      // Yesterday noon AWST to today noon AWST
+      const yesterdayNoonUTC = new Date(todayNoonUTC.getTime() - 24 * 60 * 60 * 1000);
       return {
-        startDate: startOfDay(now),
-        endDate: endOfDay(now),
+        startDate: yesterdayNoonUTC,
+        endDate: todayNoonUTC,
       };
-    case 'yesterday':
-      const yesterday = subDays(now, 1);
+    }
+
+    case 'last7days': {
+      // 7 days ago noon AWST to now
+      const sevenDaysAgoNoonUTC = new Date(todayNoonUTC.getTime() - 6 * 24 * 60 * 60 * 1000);
+      // If before noon, start from 8 days ago
+      if (currentHourAWST < 12) {
+        sevenDaysAgoNoonUTC.setTime(sevenDaysAgoNoonUTC.getTime() - 24 * 60 * 60 * 1000);
+      }
       return {
-        startDate: startOfDay(yesterday),
-        endDate: endOfDay(yesterday),
+        startDate: sevenDaysAgoNoonUTC,
+        endDate: now,
       };
-    case 'last7days':
+    }
+
+    case 'last30days': {
+      // 30 days ago noon AWST to now
+      const thirtyDaysAgoNoonUTC = new Date(todayNoonUTC.getTime() - 29 * 24 * 60 * 60 * 1000);
+      // If before noon, start from 31 days ago
+      if (currentHourAWST < 12) {
+        thirtyDaysAgoNoonUTC.setTime(thirtyDaysAgoNoonUTC.getTime() - 24 * 60 * 60 * 1000);
+      }
       return {
-        startDate: startOfDay(subDays(now, 6)),
-        endDate: endOfDay(now),
+        startDate: thirtyDaysAgoNoonUTC,
+        endDate: now,
       };
-    case 'last30days':
-      return {
-        startDate: startOfDay(subDays(now, 29)),
-        endDate: endOfDay(now),
-      };
+    }
+
     default:
-      return {
-        startDate: startOfDay(now),
-        endDate: endOfDay(now),
-      };
+      return getAWSTDayBoundaries();
   }
 }
 
@@ -279,12 +328,24 @@ export class AnalyticsAggregator {
       'callback_requested': 'other',
     };
 
+    // Create a map of VAPI calls by phone number + time for quick lookup
+    const vapiCallMap = new Map<string, any>();
+    vapiCalls.forEach(call => {
+      if (call.phoneNumber) {
+        // Use phone + rounded timestamp as key for matching
+        const timeKey = Math.floor(new Date(call.startedAt).getTime() / 60000); // Round to minute
+        const key = `${call.phoneNumber}_${timeKey}`;
+        vapiCallMap.set(key, call);
+      }
+    });
+
     // Convert n8n executions to activities (preferred source for detailed data)
     n8nExecutions.forEach(exec => {
       if (exec.data.phone) {
-        const leadName = exec.data.firstName && exec.data.lastName
-          ? `${exec.data.firstName} ${exec.data.lastName}`
-          : exec.data.firstName || exec.data.lastName || 'Unknown';
+        const leadName = exec.data.fullName ||
+          (exec.data.firstName && exec.data.lastName
+            ? `${exec.data.firstName} ${exec.data.lastName}`
+            : exec.data.firstName || exec.data.lastName || 'Unknown');
 
         // Determine outcome - check n8n data first, then call outcome
         let outcome: Activity['outcome'] = 'other';
@@ -299,46 +360,56 @@ export class AnalyticsAggregator {
           outcome = outcomeMap[rawOutcome];
         }
 
+        // Try to find matching VAPI call for additional data
+        const timeKey = Math.floor(new Date(exec.startedAt).getTime() / 60000);
+        const vapiKey = `${exec.data.phone}_${timeKey}`;
+        const matchingVapiCall = vapiCallMap.get(vapiKey);
+
+        // Get call summary - prefer n8n data, fallback to VAPI
+        let callSummary = exec.data.callSummary;
+        if (!callSummary && matchingVapiCall?.summary) {
+          callSummary = matchingVapiCall.summary;
+        }
+
+        // Get lead name - prefer n8n data, fallback to VAPI
+        let finalLeadName = leadName;
+        if (finalLeadName === 'Unknown' && matchingVapiCall?.leadName) {
+          finalLeadName = matchingVapiCall.leadName;
+        }
+
+        // If we matched a VAPI call, remove it from the map so we don't add it again
+        if (matchingVapiCall) {
+          vapiCallMap.delete(vapiKey);
+        }
+
         activities.push({
           id: exec.id,
           time: exec.startedAt,
-          type: exec.data.callType || 'outbound',
+          type: exec.data.callType || matchingVapiCall?.type || 'outbound',
           phone: exec.data.phone,
-          leadName,
+          leadName: finalLeadName,
           outcome,
           leadScore: exec.data.leadScore,
           email: exec.data.email,
-          callSummary: exec.data.callSummary,
+          callSummary,
         });
       }
     });
 
-    // Convert VAPI calls to activities (if not already in n8n data)
-    // Also merge VAPI summary into existing n8n activities if they don't have one
-    vapiCalls.forEach(call => {
-      // Check if we already have this call from n8n
-      const existingActivity = activities.find(a => a.phone === call.phoneNumber &&
-        Math.abs(new Date(a.time).getTime() - new Date(call.startedAt).getTime()) < 60000);
+    // Add remaining VAPI calls that weren't matched to n8n executions
+    vapiCallMap.forEach(call => {
+      const rawOutcome = (call.outcome || call.status || '').toLowerCase();
+      const outcome: Activity['outcome'] = outcomeMap[rawOutcome] || 'other';
 
-      if (existingActivity) {
-        // Merge VAPI summary into existing activity if it doesn't have one
-        if (!existingActivity.callSummary && call.summary) {
-          existingActivity.callSummary = call.summary;
-        }
-      } else {
-        const rawOutcome = (call.outcome || call.status || '').toLowerCase();
-        const outcome: Activity['outcome'] = outcomeMap[rawOutcome] || 'other';
-
-        activities.push({
-          id: call.id,
-          time: call.startedAt,
-          type: call.type,
-          phone: call.phoneNumber,
-          leadName: call.leadName || 'Unknown',
-          outcome,
-          callSummary: call.summary, // Include VAPI call summary
-        });
-      }
+      activities.push({
+        id: call.id,
+        time: call.startedAt,
+        type: call.type,
+        phone: call.phoneNumber,
+        leadName: call.leadName || 'Unknown',
+        outcome,
+        callSummary: call.summary,
+      });
     });
 
     // Sort by time (most recent first) and limit to 20

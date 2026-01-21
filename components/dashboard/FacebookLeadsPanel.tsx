@@ -1,7 +1,7 @@
 'use client';
 
 import { FacebookLead } from '@/types/analytics';
-import { format } from 'date-fns';
+import { formatShortTimeAWST, formatInAWST } from '@/lib/timezone';
 
 interface FacebookLeadsPanelProps {
   facebookLeads: FacebookLead[];
@@ -171,10 +171,10 @@ export default function FacebookLeadsPanel({ facebookLeads }: FacebookLeadsPanel
                 {/* Time */}
                 <div className="flex-shrink-0 text-right">
                   <div className="text-xs font-medium text-gray-900 dark:text-white">
-                    {format(new Date(lead.createdTime), 'h:mm a')}
+                    {formatShortTimeAWST(lead.createdTime)}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {format(new Date(lead.createdTime), 'MMM d')}
+                    {formatInAWST(lead.createdTime, 'MMM d')}
                   </div>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import { Activity } from '@/types/analytics';
-import { format } from 'date-fns';
+import { formatShortTimeAWST } from '@/lib/timezone';
 
 interface RecentActivityTableProps {
   activities: Activity[];
@@ -104,7 +104,7 @@ export default function RecentActivityTable({ activities }: RecentActivityTableP
                 <div className="flex items-center gap-2">
                   {getTypeBadge(activity.type)}
                   <span className="text-xs text-gray-500 dark:text-gray-300">
-                    {format(new Date(activity.time), 'h:mm a')}
+                    {formatShortTimeAWST(activity.time)}
                   </span>
                 </div>
                 {getOutcomeBadge(activity.outcome)}
@@ -178,7 +178,7 @@ export default function RecentActivityTable({ activities }: RecentActivityTableP
                   className="hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors cursor-pointer group"
                 >
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                    {format(new Date(activity.time), 'h:mm a')}
+                    {formatShortTimeAWST(activity.time)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getTypeBadge(activity.type)}

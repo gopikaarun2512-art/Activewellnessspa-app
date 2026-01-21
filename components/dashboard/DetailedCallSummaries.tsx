@@ -1,7 +1,7 @@
 'use client';
 
 import { Activity } from '@/types/analytics';
-import { format } from 'date-fns';
+import { formatShortTimeAWST } from '@/lib/timezone';
 
 interface DetailedCallSummariesProps {
   activities: Activity[];
@@ -84,7 +84,7 @@ export default function DetailedCallSummaries({ activities }: DetailedCallSummar
                 {activity.leadName}
               </h3>
               <span className="text-sm text-gray-500 dark:text-gray-400">
-                {format(new Date(activity.time), 'h:mm a')}
+                {formatShortTimeAWST(activity.time)}
               </span>
             </div>
 

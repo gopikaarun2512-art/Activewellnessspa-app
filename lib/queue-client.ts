@@ -41,7 +41,7 @@ interface QueueSheetRow {
   sentiment?: string;
   interest_level?: string;
   booking_requested?: boolean;
-  'booking _link_sent'?: boolean;
+  booking_link_sent?: boolean;
   is_member?: boolean;
   is_booked?: boolean;
   upcoming_booking_count?: number;
@@ -62,12 +62,16 @@ export class QueueClient {
    */
   async getQueueFromWebhook(): Promise<QueuedCall[]> {
     try {
-      const response = await fetch(this.webhookUrl, {
+      // Add cache-busting timestamp to prevent any caching
+      const cacheBuster = `?_t=${Date.now()}`;
+      const response = await fetch(`${this.webhookUrl}${cacheBuster}`, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
-        next: { revalidate: 0 }, // Disable caching, works better with Vercel
+        cache: 'no-store', // Disable fetch cache
       });
 
       if (!response.ok) {
@@ -75,6 +79,16 @@ export class QueueClient {
       }
 
       const data = await response.json();
+
+      // Debug: Log raw webhook response
+      console.log('[Queue Client] Raw webhook response:', {
+        itemCount: Array.isArray(data) ? data.length : (data.data?.length || 0),
+        sampleStatuses: (Array.isArray(data) ? data : data.data || []).slice(0, 3).map((item: any) => ({
+          name: item.leadName,
+          status: item.status,
+          callOutcome: item.callOutcome,
+        })),
+      });
 
       // Handle both array and wrapped response
       const items = Array.isArray(data) ? data : data.data || [];
@@ -160,20 +174,60 @@ export class QueueClient {
 
   /**
    * Get only queued (pending) calls
-   * The n8n webhook already filters out completed calls, so we return all results
-   * Only filter out if status explicitly indicates completion
+   * Filter out completed calls and stale entries
+   *
+   * IMPORTANT: If the sheet has old entries that are no longer active,
+   * we filter out items older than 24 hours
    */
   async getQueuedCalls(): Promise<QueuedCall[]> {
     const allCalls = await this.getQueue();
 
     // Statuses that indicate the call is complete and should not be shown
-    const completedStatuses = ['completed', 'failed', 'cancelled', 'done', 'called', 'no_answer', 'voicemail', 'not_interested'];
+    const completedStatuses = [
+      'completed', 'failed', 'cancelled', 'done', 'called',
+      'no_answer', 'voicemail', 'not_interested', 'ended',
+      'success', 'error', 'busy', 'wrong_number', 'callback_completed'
+    ];
 
-    return allCalls.filter(call => {
+    // Statuses containing these words indicate the call was scheduled with VAPI
+    // but if it's older than 24 hours, it's likely completed/stale
+    const scheduledWithVapiStatuses = ['scheduled_with_vapi', 'vapi'];
+
+    // Filter for stale entries - items older than 24 hours are likely stale/completed
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+    const filtered = allCalls.filter(call => {
       const status = ((call as any).status || '').toLowerCase().trim();
-      // Include if status is not in the completed list
-      return !completedStatuses.includes(status);
+      const callOutcome = ((call as any).callOutcome || '').toLowerCase().trim();
+
+      // Check if this entry is stale (older than 24 hours)
+      const queuedAt = new Date(call.queuedAt);
+      const isStale = queuedAt < twentyFourHoursAgo;
+
+      // If stale (older than 24 hours), filter it out regardless of status
+      // These are old entries that should have been processed already
+      if (isStale) {
+        console.log(`[Queue Filter] Removing stale entry: ${call.leadName} (queued ${call.queuedAt}, status: ${status})`);
+        return false;
+      }
+
+      // If status indicates completion, exclude it
+      if (completedStatuses.some(cs => status.includes(cs))) {
+        return false;
+      }
+
+      // If has a call outcome indicating completion, filter out
+      if (callOutcome && completedStatuses.some(cs => callOutcome.includes(cs))) {
+        return false;
+      }
+
+      // Include the call if it passed all filters
+      return true;
     });
+
+    console.log(`[Queue Filter] Filtered ${allCalls.length} -> ${filtered.length} calls`);
+    return filtered;
   }
 
   /**

@@ -1,13 +1,47 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { QueuedCall } from '@/types/analytics';
-import { format } from 'date-fns';
+import { formatShortTimeAWST } from '@/lib/timezone';
 
 interface QueuedCallsPanelProps {
   queuedCalls: QueuedCall[];
+  onClearQueue?: () => void;
 }
 
-export default function QueuedCallsPanel({ queuedCalls }: QueuedCallsPanelProps) {
+export default function QueuedCallsPanel({ queuedCalls, onClearQueue }: QueuedCallsPanelProps) {
+  const [isQueueHidden, setIsQueueHidden] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Check localStorage for hidden state on mount
+  useEffect(() => {
+    const hiddenUntil = localStorage.getItem('queueHiddenUntil');
+    if (hiddenUntil) {
+      const hiddenTime = new Date(hiddenUntil);
+      if (hiddenTime > new Date()) {
+        setIsQueueHidden(true);
+      } else {
+        localStorage.removeItem('queueHiddenUntil');
+      }
+    }
+  }, []);
+
+  const handleClearQueue = () => {
+    // Hide queue for 1 hour
+    const hideUntil = new Date(Date.now() + 60 * 60 * 1000);
+    localStorage.setItem('queueHiddenUntil', hideUntil.toISOString());
+    setIsQueueHidden(true);
+    setShowConfirm(false);
+    onClearQueue?.();
+  };
+
+  const handleRestoreQueue = () => {
+    localStorage.removeItem('queueHiddenUntil');
+    setIsQueueHidden(false);
+  };
+
+  // If queue is hidden, show empty state
+  const displayedCalls = isQueueHidden ? [] : queuedCalls;
   // Priority colors (using Active Wellness theme)
   const getPriorityColor = (priority: string = 'medium') => {
     const colors = {
@@ -48,21 +82,64 @@ export default function QueuedCallsPanel({ queuedCalls }: QueuedCallsPanelProps)
               Call Queue
             </h2>
             <p className="text-sm text-white/90 dark:text-wellness-neutral-300">
-              {queuedCalls.length} {queuedCalls.length === 1 ? 'call' : 'calls'} in progress
+              {isQueueHidden ? '0 calls (cleared)' : `${displayedCalls.length} ${displayedCalls.length === 1 ? 'call' : 'calls'} in progress`}
             </p>
           </div>
-          {queuedCalls.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-wellness-900 text-white rounded-full text-sm font-medium shadow-sm">
-              <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
-              Active
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Clear/Restore Queue Button */}
+            {isQueueHidden ? (
+              <button
+                onClick={handleRestoreQueue}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-colors"
+                title="Restore queue display"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Restore
+              </button>
+            ) : queuedCalls.length > 0 && (
+              showConfirm ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleClearQueue}
+                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs font-medium transition-colors"
+                  >
+                    Confirm Clear
+                  </button>
+                  <button
+                    onClick={() => setShowConfirm(false)}
+                    className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowConfirm(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-colors"
+                  title="Clear queue display (hides for 1 hour)"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Clear
+                </button>
+              )
+            )}
+            {displayedCalls.length > 0 && !isQueueHidden && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-wellness-900 text-white rounded-full text-sm font-medium shadow-sm">
+                <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                Active
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Queue List */}
       <div className="divide-y divide-gray-200 dark:divide-gray-700">
-        {queuedCalls.length === 0 ? (
+        {displayedCalls.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <div className="max-w-sm mx-auto">
               {/* Enhanced checkmark illustration */}
@@ -96,7 +173,7 @@ export default function QueuedCallsPanel({ queuedCalls }: QueuedCallsPanelProps)
             </div>
           </div>
         ) : (
-          queuedCalls.slice(0, 10).map((call, index) => (
+          displayedCalls.slice(0, 10).map((call, index) => (
             <div
               key={call.id}
               className="px-6 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group"
@@ -130,7 +207,7 @@ export default function QueuedCallsPanel({ queuedCalls }: QueuedCallsPanelProps)
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Queued {format(new Date(call.queuedAt), 'h:mm a')}
+                      Queued {formatShortTimeAWST(call.queuedAt)}
                     </span>
                     {call.workflowName && (
                       <>
@@ -164,10 +241,19 @@ export default function QueuedCallsPanel({ queuedCalls }: QueuedCallsPanelProps)
       </div>
 
       {/* Footer - Show More */}
-      {queuedCalls.length > 10 && (
+      {displayedCalls.length > 10 && (
         <div className="px-6 py-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700">
           <p className="text-sm text-center text-gray-600 dark:text-gray-300">
-            Showing 10 of {queuedCalls.length} queued calls
+            Showing 10 of {displayedCalls.length} queued calls
+          </p>
+        </div>
+      )}
+
+      {/* Hidden notice */}
+      {isQueueHidden && queuedCalls.length > 0 && (
+        <div className="px-6 py-3 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-700">
+          <p className="text-sm text-center text-amber-700 dark:text-amber-300">
+            Queue display cleared. {queuedCalls.length} items hidden. Click "Restore" to show again.
           </p>
         </div>
       )}

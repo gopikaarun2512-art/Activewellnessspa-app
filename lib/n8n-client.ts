@@ -42,6 +42,7 @@ export class N8NClient {
     status?: 'success' | 'error' | 'running';
     startedAfter?: string;
     limit?: number;
+    includeData?: boolean;
   } = {}): Promise<N8NExecution[]> {
     const queryParams = new URLSearchParams();
 
@@ -52,7 +53,24 @@ export class N8NClient {
 
     const data: N8NExecutionsResponse = await this.fetch(`/executions?${queryParams}`);
 
-    let executions = data.data.map(this.mapExecution);
+    // If includeData is requested, fetch full execution data for each execution
+    let executions: N8NExecution[];
+    if (params.includeData) {
+      const fullExecutions = await Promise.all(
+        data.data.map(async (exec: any) => {
+          try {
+            const fullExec = await this.fetch(`/executions/${exec.id}?includeData=true`);
+            return this.mapExecution(fullExec);
+          } catch (e) {
+            console.error(`Failed to fetch full execution ${exec.id}:`, e);
+            return this.mapExecution(exec);
+          }
+        })
+      );
+      executions = fullExecutions;
+    } else {
+      executions = data.data.map((exec: any) => this.mapExecution(exec));
+    }
 
     // Filter by startedAfter client-side if provided
     if (params.startedAfter) {
@@ -103,61 +121,165 @@ export class N8NClient {
     if (raw.data?.resultData?.runData) {
       const runData = raw.data.resultData.runData;
 
-      // Look through nodes for relevant data
-      Object.values(runData).forEach((nodeRuns: any) => {
-        if (Array.isArray(nodeRuns)) {
-          nodeRuns.forEach((run: any) => {
-            if (run.data?.main?.[0]) {
-              run.data.main[0].forEach((item: any) => {
-                if (item.json) {
-                  // Extract phone
-                  if (item.json.phone) executionData.phone = item.json.phone;
-                  if (item.json.phoneNumber) executionData.phone = item.json.phoneNumber;
+      // Priority extraction from known workflow nodes (like Facebook leads client)
+      // These nodes have the most reliable, normalized data
 
-                  // Extract names
-                  if (item.json.firstName) executionData.firstName = item.json.firstName;
-                  if (item.json.lastName) executionData.lastName = item.json.lastName;
-
-                  // Extract email
-                  if (item.json.email) executionData.email = item.json.email;
-
-                  // Extract lead score
-                  if (item.json.lead_score !== undefined) executionData.leadScore = item.json.lead_score;
-                  if (item.json.leadScore !== undefined) executionData.leadScore = item.json.leadScore;
-
-                  // Extract booking status - check all possible fields from workflows
-                  if (item.json.booked !== undefined) executionData.booked = item.json.booked;
-                  if (item.json.booking_requested !== undefined) executionData.bookingRequested = item.json.booking_requested;
-                  if (item.json.is_booked !== undefined) executionData.isBooked = item.json.is_booked;
-
-                  // Extract outcome - prioritize call_outcome from VAPI Status Handler
-                  if (item.json.outcome) executionData.outcome = item.json.outcome;
-                  if (item.json.call_outcome) executionData.outcome = item.json.call_outcome;
-
-                  // Extract interest level from VAPI structured outputs
-                  if (item.json.interest_level) executionData.interestLevel = item.json.interest_level;
-                  if (item.json.service_interest) executionData.serviceInterest = item.json.service_interest;
-
-                  // Extract link sent status
-                  if (item.json.linkSent !== undefined) executionData.linkSent = item.json.linkSent;
-                  if (item.json.link_sent !== undefined) executionData.linkSent = item.json.link_sent;
-                  if (item.json.bookingLinkSent !== undefined) executionData.linkSent = item.json.bookingLinkSent;
-
-                  // Extract call summary
-                  if (item.json.callSummary) executionData.callSummary = item.json.callSummary;
-                  if (item.json.call_summary) executionData.callSummary = item.json.call_summary;
-                  if (item.json.summary) executionData.callSummary = item.json.summary;
-                  if (item.json.conversation_summary) executionData.callSummary = item.json.conversation_summary;
-
-                  // Try to determine call type from workflow name or data
-                  if (item.json.callType) executionData.callType = item.json.callType;
-                  if (item.json.type) executionData.callType = item.json.type;
-                }
-              });
-            }
-          });
+      // 1. Check "VAPI Status Handler" or similar call status nodes for call outcomes
+      const vapiStatusNodeNames = [
+        'VAPI Status Handler',
+        'Process VAPI Status',
+        'Handle Call Status',
+        'Call Status Handler',
+      ];
+      for (const nodeName of vapiStatusNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            if (json.call_outcome) executionData.outcome = json.call_outcome;
+            if (json.call_summary) executionData.callSummary = json.call_summary;
+            if (json.summary) executionData.callSummary = json.summary;
+            if (json.booking_requested !== undefined) executionData.bookingRequested = json.booking_requested;
+            if (json.interest_level) executionData.interestLevel = json.interest_level;
+          }
         }
-      });
+      }
+
+      // 2. Check "Normalize Lead Data" node for lead info (same as Facebook leads)
+      const normalizeNodeNames = [
+        'Normalize Lead Data (Phone + Attribution)',
+        'Normalize Lead Data',
+        'Process Lead Data',
+      ];
+      for (const nodeName of normalizeNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            if (json.phone_raw || json.phone_e164 || json.phone) {
+              executionData.phone = json.phone_raw || json.phone_e164 || json.phone;
+            }
+            if (json.firstName) executionData.firstName = json.firstName;
+            if (json.lastName) executionData.lastName = json.lastName;
+            if (json.full_name) executionData.fullName = json.full_name;
+            if (json.email) executionData.email = json.email;
+            if (json.lead_score !== undefined) executionData.leadScore = json.lead_score;
+          }
+        }
+      }
+
+      // 3. Check "Parse GymMaster Response" for booking status
+      const gymMasterNodeNames = [
+        'Parse GymMaster Response',
+        'GymMaster Response',
+        'Check GymMaster',
+      ];
+      for (const nodeName of gymMasterNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            if (json.is_booked !== undefined) executionData.isBooked = json.is_booked;
+            if (json.is_member !== undefined) executionData.isMember = json.is_member;
+            if (json.member_id) executionData.memberId = json.member_id;
+          }
+        }
+      }
+
+      // 4. Check for VAPI webhook data nodes (contains call summary and structured outputs)
+      const vapiWebhookNodeNames = [
+        'Webhook',
+        'VAPI Webhook',
+        'Call Webhook',
+      ];
+      for (const nodeName of vapiWebhookNodeNames) {
+        if (runData[nodeName] && !executionData.callSummary) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            // VAPI sends summary at top level or in message.summary
+            if (json.summary) executionData.callSummary = json.summary;
+            if (json.message?.summary) executionData.callSummary = json.message.summary;
+            if (json.message?.analysis?.summary) executionData.callSummary = json.message.analysis.summary;
+            // Also check for call outcome in webhook data
+            if (json.message?.analysis?.structuredData?.outcome) {
+              executionData.outcome = json.message.analysis.structuredData.outcome;
+            }
+          }
+        }
+      }
+
+      // Fallback: Look through all nodes if we don't have required data
+      if (!executionData.phone || !executionData.callSummary) {
+        Object.entries(runData).forEach(([nodeName, nodeRuns]: [string, any]) => {
+          if (Array.isArray(nodeRuns)) {
+            nodeRuns.forEach((run: any) => {
+              if (run.data?.main?.[0]) {
+                run.data.main[0].forEach((item: any) => {
+                  if (item.json) {
+                    // Only set if not already set (priority to specific nodes above)
+                    // Extract phone
+                    if (!executionData.phone) {
+                      if (item.json.phone) executionData.phone = item.json.phone;
+                      if (item.json.phoneNumber) executionData.phone = item.json.phoneNumber;
+                      if (item.json.phone_raw) executionData.phone = item.json.phone_raw;
+                      if (item.json.phone_e164) executionData.phone = item.json.phone_e164;
+                    }
+
+                    // Extract names
+                    if (!executionData.firstName && item.json.firstName) executionData.firstName = item.json.firstName;
+                    if (!executionData.lastName && item.json.lastName) executionData.lastName = item.json.lastName;
+                    if (!executionData.fullName && item.json.full_name) executionData.fullName = item.json.full_name;
+
+                    // Extract email
+                    if (!executionData.email && item.json.email) executionData.email = item.json.email;
+
+                    // Extract lead score
+                    if (executionData.leadScore === undefined) {
+                      if (item.json.lead_score !== undefined) executionData.leadScore = item.json.lead_score;
+                      if (item.json.leadScore !== undefined) executionData.leadScore = item.json.leadScore;
+                    }
+
+                    // Extract booking status - check all possible fields from workflows
+                    if (executionData.isBooked === undefined) {
+                      if (item.json.booked !== undefined) executionData.booked = item.json.booked;
+                      if (item.json.booking_requested !== undefined) executionData.bookingRequested = item.json.booking_requested;
+                      if (item.json.is_booked !== undefined) executionData.isBooked = item.json.is_booked;
+                    }
+
+                    // Extract outcome - prioritize call_outcome from VAPI Status Handler
+                    if (!executionData.outcome) {
+                      if (item.json.outcome) executionData.outcome = item.json.outcome;
+                      if (item.json.call_outcome) executionData.outcome = item.json.call_outcome;
+                    }
+
+                    // Extract interest level from VAPI structured outputs
+                    if (!executionData.interestLevel && item.json.interest_level) executionData.interestLevel = item.json.interest_level;
+                    if (!executionData.serviceInterest && item.json.service_interest) executionData.serviceInterest = item.json.service_interest;
+
+                    // Extract link sent status
+                    if (executionData.linkSent === undefined) {
+                      if (item.json.linkSent !== undefined) executionData.linkSent = item.json.linkSent;
+                      if (item.json.link_sent !== undefined) executionData.linkSent = item.json.link_sent;
+                      if (item.json.bookingLinkSent !== undefined) executionData.linkSent = item.json.bookingLinkSent;
+                    }
+
+                    // Extract call summary
+                    if (!executionData.callSummary) {
+                      if (item.json.callSummary) executionData.callSummary = item.json.callSummary;
+                      if (item.json.call_summary) executionData.callSummary = item.json.call_summary;
+                      if (item.json.summary) executionData.callSummary = item.json.summary;
+                      if (item.json.conversation_summary) executionData.callSummary = item.json.conversation_summary;
+                    }
+
+                    // Try to determine call type from workflow name or data
+                    if (!executionData.callType) {
+                      if (item.json.callType) executionData.callType = item.json.callType;
+                      if (item.json.type) executionData.callType = item.json.type;
+                    }
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
     }
 
     return {
@@ -171,13 +293,25 @@ export class N8NClient {
     };
   }
 
+  /**
+   * Helper to extract JSON from a node's run data
+   */
+  private getNodeJson(nodeRuns: any): any | null {
+    if (Array.isArray(nodeRuns) && nodeRuns[0]?.data?.main?.[0]?.[0]?.json) {
+      return nodeRuns[0].data.main[0][0].json;
+    }
+    return null;
+  }
+
   // Get executions for a specific date range
   async getCallData(startDate: Date, endDate: Date): Promise<N8NExecution[]> {
     // n8n API limit is 250 max
+    // Use includeData: true to fetch full execution data (like Facebook leads client)
     const executions = await this.listExecutions({
       status: 'success',
       startedAfter: startDate.toISOString(),
       limit: 250,
+      includeData: true, // Fetch full execution data for proper extraction
     });
 
     // Filter by end date client-side (n8n API doesn't have startedBefore param)

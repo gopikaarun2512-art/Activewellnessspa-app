@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { analyticsAggregator } from '@/lib/analytics-aggregator';
 import { gamificationCalculator } from '@/lib/gamification';
+import { getNowInAWST, formatInAWST } from '@/lib/timezone';
 
 // Force dynamic rendering on Vercel (required for external API calls)
 export const dynamic = 'force-dynamic';
@@ -14,14 +15,20 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const dateRange = searchParams.get('dateRange') || 'today';
+    const forceRefresh = searchParams.get('refresh') === 'true';
     const now = Date.now();
 
     // Create cache key based on date range
     const cacheKey = `dashboard-${dateRange}`;
     const cached = cacheStore.get(cacheKey);
 
-    // Return cached data if still fresh
-    if (cached && (now - cached.time) < CACHE_DURATION) {
+    // Clear cache if force refresh requested
+    if (forceRefresh) {
+      cacheStore.delete(cacheKey);
+    }
+
+    // Return cached data if still fresh (unless force refresh)
+    if (!forceRefresh && cached && (now - cached.time) < CACHE_DURATION) {
       return NextResponse.json({
         ...cached.data,
         cached: true,
@@ -40,10 +47,14 @@ export async function GET(request: Request) {
       dashboardData.metrics.totalCalls // This should be total all-time calls
     );
 
+    const nowAWST = getNowInAWST();
     const response = {
       dashboard: dashboardData,
       gamification: gamificationData,
       timestamp: new Date().toISOString(),
+      awstTime: formatInAWST(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+      dailyResetTime: '12:00 PM AWST',
+      nextResetHour: nowAWST.getHours() >= 12 ? 'Tomorrow 12:00 PM AWST' : 'Today 12:00 PM AWST',
     };
 
     // Update cache with date range key

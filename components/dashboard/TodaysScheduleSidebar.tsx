@@ -1,7 +1,8 @@
 'use client';
 
 import { QueuedCall, Activity, FacebookLead } from '@/types/analytics';
-import { format, isToday, addMinutes } from 'date-fns';
+import { addMinutes } from 'date-fns';
+import { formatInAWST, formatShortTimeAWST, getNowInAWST } from '@/lib/timezone';
 
 interface TodaysScheduleSidebarProps {
   queuedCalls: QueuedCall[];
@@ -18,7 +19,7 @@ export default function TodaysScheduleSidebar({
   totalCalls,
   totalBookings,
 }: TodaysScheduleSidebarProps) {
-  const now = new Date();
+  const now = getNowInAWST();
   const currentHour = now.getHours();
 
   // Get next 3 upcoming calls from queue
@@ -53,7 +54,7 @@ export default function TodaysScheduleSidebar({
           <h2 className="text-xl font-bold text-white dark:text-wellness-neutral-100">Today's Schedule</h2>
         </div>
         <p className="text-white/90 dark:text-wellness-neutral-300 text-sm">
-          {format(now, 'EEEE, MMMM d')}
+          {formatInAWST(now, 'EEEE, MMMM d')} (AWST)
         </p>
       </div>
 
@@ -143,7 +144,7 @@ export default function TodaysScheduleSidebar({
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <span className="font-medium">~{format(getEstimatedTime(index), 'h:mm a')}</span>
+                    <span className="font-medium">~{formatShortTimeAWST(getEstimatedTime(index))}</span>
                   </div>
                 </div>
               ))
@@ -177,7 +178,7 @@ export default function TodaysScheduleSidebar({
                         {booking.leadName}
                       </p>
                       <p className="text-xs text-gray-600 dark:text-gray-300">
-                        {format(new Date(booking.time), 'h:mm a')}
+                        {formatShortTimeAWST(booking.time)}
                       </p>
                     </div>
                   </div>
@@ -224,7 +225,7 @@ export default function TodaysScheduleSidebar({
                           </span>
                         )}
                         <span className="text-xs text-gray-600 dark:text-gray-300">
-                          {format(new Date(lead.createdTime), 'h:mm a')}
+                          {formatShortTimeAWST(lead.createdTime)}
                         </span>
                       </div>
                     </div>

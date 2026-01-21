@@ -31,7 +31,7 @@ function DashboardContent() {
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange>('today');
   const { showToast } = useToast();
 
-  const fetchData = useCallback(async (isRefresh = false, dateRange?: DateRange) => {
+  const fetchData = useCallback(async (isRefresh = false, dateRange?: DateRange, forceRefresh = false) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
@@ -39,7 +39,9 @@ function DashboardContent() {
 
       // Use provided dateRange or fall back to selected state
       const range = dateRange || selectedDateRange;
-      const response = await fetch(`/api/analytics/dashboard?dateRange=${range}`);
+      // Add refresh=true to bust the cache when manually refreshing
+      const refreshParam = (isRefresh || forceRefresh) ? '&refresh=true' : '';
+      const response = await fetch(`/api/analytics/dashboard?dateRange=${range}${refreshParam}`);
       if (!response.ok) throw new Error('Failed to fetch data');
 
       const result = await response.json();
