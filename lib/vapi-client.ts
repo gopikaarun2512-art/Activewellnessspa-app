@@ -41,7 +41,7 @@ export class VAPIClient {
 
     const data = await this.fetch(`/call?${queryParams}`);
 
-    return (data || []).map(this.mapCall);
+    return (data || []).map((call: any) => this.mapCall(call));
   }
 
   async getCall(id: string): Promise<VAPICall> {
