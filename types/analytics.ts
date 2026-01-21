@@ -42,6 +42,44 @@ export interface QueuedCall {
   estimatedCallTime?: string;
   priority?: 'high' | 'medium' | 'low';
   workflowName?: string;
+  // Extended fields for call tracking
+  status?: string;
+  email?: string;
+  contactId?: string;
+  opportunityId?: string;
+  attempts?: number;
+  vapiCallId?: string;
+  callOutcome?: string;
+  batchPosition?: number;
+  callbackReason?: string;
+}
+
+// Scheduled callbacks - calls that were requested to be called back later
+export interface ScheduledCallback {
+  id: string;
+  phone: string;
+  leadName: string;
+  type: 'inbound' | 'outbound';
+  scheduledAt: string;         // When the callback is scheduled
+  originalCallTime?: string;   // When the original call was made
+  callbackReason?: string;     // Why callback was requested
+  priority?: 'high' | 'medium' | 'low';
+  vapiCallId?: string;
+  email?: string;
+}
+
+// Completed/Instantly called - calls that have been processed
+export interface CompletedCall {
+  id: string;
+  phone: string;
+  leadName: string;
+  type: 'inbound' | 'outbound';
+  calledAt: string;
+  callOutcome: string;
+  callDuration?: number;
+  vapiCallId?: string;
+  summary?: string;
+  email?: string;
 }
 
 export interface DashboardData {
@@ -49,7 +87,9 @@ export interface DashboardData {
   callVolume: CallVolumeData[];
   outcomes: CallOutcome[];
   recentActivity: Activity[];
-  queuedCalls: QueuedCall[];
+  queuedCalls: QueuedCall[];           // Calls waiting in queue (not yet called)
+  scheduledCallbacks: ScheduledCallback[];  // Callbacks scheduled for later
+  completedCalls: CompletedCall[];      // Calls that have been made (instantly called)
   facebookLeads: FacebookLead[];
   lastUpdated: string;
 }

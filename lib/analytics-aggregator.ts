@@ -12,11 +12,81 @@ import {
   CallOutcome,
   Activity,
   QueuedCall,
+  ScheduledCallback,
+  CompletedCall,
   FacebookLead,
 } from '@/types/analytics';
 import { subDays } from 'date-fns';
 
 export type DateRangeType = 'today' | 'yesterday' | 'last7days' | 'last30days';
+
+/**
+ * Get AWST midnight-to-midnight boundaries in UTC
+ * For Facebook leads: 12:00 AM AWST to 11:59 PM AWST
+ * AWST midnight = UTC 16:00 (previous day)
+ */
+function getAWSTMidnightBoundaries(range: DateRangeType): { startDate: Date; endDate: Date } {
+  const now = new Date();
+
+  // Get current date in AWST using Intl API
+  const awstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Perth',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const awstDateStr = awstFormatter.format(now); // YYYY-MM-DD in AWST
+
+  // Parse AWST date components
+  const [year, month, day] = awstDateStr.split('-').map(Number);
+
+  // Create midnight AWST in UTC
+  // AWST midnight = UTC 16:00 previous day (midnight - 8 hours = 16:00 UTC previous day)
+  // So for Jan 21 midnight AWST, we need Jan 20 16:00 UTC
+  const todayMidnightAWSTinUTC = new Date(Date.UTC(year, month - 1, day - 1, 16, 0, 0, 0));
+
+  // End of day: 11:59:59.999 PM AWST = 15:59:59.999 UTC same day
+  const todayEndAWSTinUTC = new Date(Date.UTC(year, month - 1, day, 15, 59, 59, 999));
+
+  switch (range) {
+    case 'today':
+      return {
+        startDate: todayMidnightAWSTinUTC,
+        endDate: now, // Use current time as end
+      };
+
+    case 'yesterday': {
+      const yesterdayMidnight = new Date(todayMidnightAWSTinUTC.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayEnd = new Date(todayMidnightAWSTinUTC.getTime() - 1); // 11:59:59.999 PM yesterday
+      return {
+        startDate: yesterdayMidnight,
+        endDate: yesterdayEnd,
+      };
+    }
+
+    case 'last7days': {
+      const sevenDaysAgo = new Date(todayMidnightAWSTinUTC.getTime() - 6 * 24 * 60 * 60 * 1000);
+      return {
+        startDate: sevenDaysAgo,
+        endDate: now,
+      };
+    }
+
+    case 'last30days': {
+      const thirtyDaysAgo = new Date(todayMidnightAWSTinUTC.getTime() - 29 * 24 * 60 * 60 * 1000);
+      return {
+        startDate: thirtyDaysAgo,
+        endDate: now,
+      };
+    }
+
+    default:
+      return {
+        startDate: todayMidnightAWSTinUTC,
+        endDate: now,
+      };
+  }
+}
 
 /**
  * Get the AWST noon reset boundaries in UTC
@@ -104,13 +174,14 @@ function getDateRange(range: DateRangeType): { startDate: Date; endDate: Date } 
 
 export class AnalyticsAggregator {
   async getDashboardData(dateRange: string = 'today'): Promise<DashboardData> {
-    // Get date range boundaries
-    const { startDate, endDate } = getDateRange(dateRange as DateRangeType);
+    // Use midnight-to-midnight AWST boundaries for all data (12:00 AM to 11:59 PM AWST)
+    const { startDate, endDate } = getAWSTMidnightBoundaries(dateRange as DateRangeType);
 
     // Fetch data from all sources in parallel
     // Primary queue source: Google Sheet via n8n webhook (with fallback)
     // Bookings: From n8n execution data (is_booked flag) - tracks FB ad leads only
-    const [n8nExecutions, vapiCalls, sheetQueuedCalls, facebookLeads] = await Promise.all([
+    // All data uses midnight-to-midnight AWST boundaries
+    const [n8nExecutions, vapiCalls, separatedCallData, facebookLeads] = await Promise.all([
       n8nClient.getCallData(startDate, endDate).catch((err) => {
         console.error('Failed to fetch n8n executions:', err);
         return [];
@@ -119,9 +190,9 @@ export class AnalyticsAggregator {
         console.error('Failed to fetch VAPI calls:', err);
         return [];
       }),
-      queueClient.getQueuedCalls().catch((err) => {
-        console.error('Failed to fetch queue from sheet:', err);
-        return [];
+      queueClient.getSeparatedCallData().catch((err) => {
+        console.error('Failed to fetch separated queue data:', err);
+        return { queuedCalls: [], scheduledCallbacks: [], completedCalls: [] };
       }),
       facebookLeadsClient.getLeads(startDate, endDate).catch((err) => {
         console.error('Failed to fetch Facebook leads:', err);
@@ -135,9 +206,10 @@ export class AnalyticsAggregator {
     const outcomes = this.calculateOutcomes(vapiCalls, n8nExecutions);
     const recentActivity = this.getRecentActivity(n8nExecutions, vapiCalls);
 
-    // Use Google Sheet queue data as primary source
-    // Sort by priority (high first) then by queued time
-    const queuedCalls = this.sortQueuedCalls(sheetQueuedCalls);
+    // Use separated queue data - queued, callbacks, and completed calls
+    const queuedCalls = this.sortQueuedCalls(separatedCallData.queuedCalls);
+    const scheduledCallbacks = this.sortScheduledCallbacks(separatedCallData.scheduledCallbacks);
+    const completedCalls = this.sortCompletedCalls(separatedCallData.completedCalls);
 
     return {
       metrics,
@@ -145,6 +217,8 @@ export class AnalyticsAggregator {
       outcomes,
       recentActivity,
       queuedCalls,
+      scheduledCallbacks,
+      completedCalls,
       facebookLeads,
       lastUpdated: new Date().toISOString(),
     };
@@ -167,6 +241,37 @@ export class AnalyticsAggregator {
 
       // Then sort by queued time (earliest first)
       return new Date(a.queuedAt).getTime() - new Date(b.queuedAt).getTime();
+    });
+  }
+
+  /**
+   * Sort scheduled callbacks by scheduled time (soonest first), then by priority
+   */
+  private sortScheduledCallbacks(callbacks: ScheduledCallback[]): ScheduledCallback[] {
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+
+    return callbacks.sort((a, b) => {
+      // First sort by scheduled time (soonest first)
+      const timeA = new Date(a.scheduledAt).getTime();
+      const timeB = new Date(b.scheduledAt).getTime();
+
+      if (timeA !== timeB) {
+        return timeA - timeB;
+      }
+
+      // Then by priority
+      const priorityA = priorityOrder[a.priority || 'medium'];
+      const priorityB = priorityOrder[b.priority || 'medium'];
+      return priorityA - priorityB;
+    });
+  }
+
+  /**
+   * Sort completed calls by time (most recent first)
+   */
+  private sortCompletedCalls(calls: CompletedCall[]): CompletedCall[] {
+    return calls.sort((a, b) => {
+      return new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime();
     });
   }
 
@@ -401,21 +506,48 @@ export class AnalyticsAggregator {
       const rawOutcome = (call.outcome || call.status || '').toLowerCase();
       const outcome: Activity['outcome'] = outcomeMap[rawOutcome] || 'other';
 
+      // Ensure phone is always a string (VAPI can return object with {number, id, ...})
+      let phone = '';
+      if (typeof call.phoneNumber === 'string') {
+        phone = call.phoneNumber;
+      } else if (call.phoneNumber?.number) {
+        phone = call.phoneNumber.number;
+      }
+
       activities.push({
         id: call.id,
         time: call.startedAt,
         type: call.type,
-        phone: call.phoneNumber,
+        phone,
         leadName: call.leadName || 'Unknown',
         outcome,
         callSummary: call.summary,
       });
     });
 
-    // Sort by time (most recent first) and limit to 20
-    return activities
-      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-      .slice(0, 20);
+    // Sort by time (most recent first)
+    const sortedActivities = activities
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+    // Deduplicate: Keep only ONE entry per phone number for the entire day
+    // Shows the most recent call attempt for each unique phone number
+    const deduplicatedActivities: Activity[] = [];
+    const seenPhones = new Set<string>();
+
+    for (const activity of sortedActivities) {
+      if (!activity.phone) {
+        deduplicatedActivities.push(activity);
+        continue;
+      }
+
+      // Only include if we haven't seen this phone number yet today
+      if (!seenPhones.has(activity.phone)) {
+        deduplicatedActivities.push(activity);
+        seenPhones.add(activity.phone);
+      }
+    }
+
+    return deduplicatedActivities.slice(0, 20);
   }
 
 }

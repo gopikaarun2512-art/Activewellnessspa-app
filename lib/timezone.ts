@@ -73,10 +73,50 @@ export function getNowUTC(): Date {
 
 /**
  * Format a date in AWST timezone
+ * Uses Intl.DateTimeFormat for correct timezone handling regardless of server location
  */
 export function formatInAWST(date: Date | string, formatStr: string): string {
-  const awstDate = toAWST(date);
-  return format(awstDate, formatStr);
+  const inputDate = typeof date === 'string' ? new Date(date) : date;
+
+  // Use native Intl API for correct timezone handling
+  // This works correctly regardless of server timezone
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone: 'Australia/Perth',
+  };
+
+  // Map date-fns format strings to Intl options
+  if (formatStr === 'h:mm a') {
+    options.hour = 'numeric';
+    options.minute = '2-digit';
+    options.hour12 = true;
+  } else if (formatStr === 'MMM d') {
+    options.month = 'short';
+    options.day = 'numeric';
+  } else if (formatStr === 'MMM d, h:mm a') {
+    options.month = 'short';
+    options.day = 'numeric';
+    options.hour = 'numeric';
+    options.minute = '2-digit';
+    options.hour12 = true;
+  } else if (formatStr === 'EEEE, MMMM d, yyyy') {
+    options.weekday = 'long';
+    options.month = 'long';
+    options.day = 'numeric';
+    options.year = 'numeric';
+  } else if (formatStr === 'yyyy-MM-dd') {
+    options.year = 'numeric';
+    options.month = '2-digit';
+    options.day = '2-digit';
+    // Return in ISO format
+    const parts = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: 'Australia/Perth' }).format(inputDate);
+    return parts;
+  } else {
+    // Fallback to date-fns format with shifted date
+    const awstDate = toAWST(inputDate);
+    return format(awstDate, formatStr);
+  }
+
+  return new Intl.DateTimeFormat('en-AU', options).format(inputDate);
 }
 
 /**

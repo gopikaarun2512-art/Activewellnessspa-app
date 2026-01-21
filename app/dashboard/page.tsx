@@ -7,8 +7,10 @@ import CallVolumeChart from '@/components/dashboard/CallVolumeChart';
 import CallOutcomesChart from '@/components/dashboard/CallOutcomesChart';
 import CallSummaryPanel from '@/components/dashboard/CallSummaryPanel';
 import DetailedCallSummaries from '@/components/dashboard/DetailedCallSummaries';
-import RecentActivityTable from '@/components/dashboard/RecentActivityTable';
+// RecentActivityTable removed
 import QueuedCallsPanel from '@/components/dashboard/QueuedCallsPanel';
+import ScheduledCallbacksPanel from '@/components/dashboard/ScheduledCallbacksPanel';
+import CompletedCallsPanel from '@/components/dashboard/CompletedCallsPanel';
 import FacebookLeadsPanel from '@/components/dashboard/FacebookLeadsPanel';
 import TodaysScheduleSidebar from '@/components/dashboard/TodaysScheduleSidebar';
 import { DateRange } from '@/components/dashboard/DateRangeFilter';
@@ -229,9 +231,22 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* Queued Calls Panel */}
-              <div className="stagger-item">
-                <QueuedCallsPanel queuedCalls={data.dashboard.queuedCalls} />
+              {/* Call Status Panels - 3 columns on large screens */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Queued Calls Panel */}
+                <div className="stagger-item">
+                  <QueuedCallsPanel queuedCalls={data.dashboard.queuedCalls} />
+                </div>
+
+                {/* Scheduled Callbacks Panel */}
+                <div className="stagger-item">
+                  <ScheduledCallbacksPanel callbacks={data.dashboard.scheduledCallbacks || []} />
+                </div>
+
+                {/* Completed Calls Panel */}
+                <div className="stagger-item">
+                  <CompletedCallsPanel calls={data.dashboard.completedCalls || []} />
+                </div>
               </div>
 
               {/* Facebook Leads Panel */}
@@ -242,10 +257,6 @@ function DashboardContent() {
               {/* Detailed Call Summaries */}
               <div className="stagger-item">
                 <DetailedCallSummaries activities={filteredActivities} />
-              </div>
-
-              <div className="stagger-item">
-                <RecentActivityTable activities={filteredActivities} />
               </div>
             </div>
           </div>

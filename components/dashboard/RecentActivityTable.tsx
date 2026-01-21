@@ -184,7 +184,7 @@ export default function RecentActivityTable({ activities }: RecentActivityTableP
                     {getTypeBadge(activity.type)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-mono">
-                    {activity.phone}
+                    {typeof activity.phone === 'string' ? activity.phone : (activity.phone as any)?.number || '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                     {activity.leadName || '-'}

@@ -173,10 +173,25 @@ export class VAPIClient {
       summary = raw.artifact.summary;
     }
 
+    // Extract phone number - handle both string and object formats
+    // VAPI can return phoneNumber as object: {id, orgId, number, provider, ...}
+    let phoneNumber = '';
+    if (raw.customer?.number) {
+      phoneNumber = raw.customer.number;
+    } else if (typeof raw.phoneNumber === 'string') {
+      phoneNumber = raw.phoneNumber;
+    } else if (raw.phoneNumber?.number) {
+      // Handle case where phoneNumber is an object with a 'number' property
+      phoneNumber = raw.phoneNumber.number;
+    } else if (raw.phoneNumberId) {
+      // Fallback to ID if actual number not available
+      phoneNumber = raw.phoneNumberId;
+    }
+
     return {
       id: raw.id,
       type,
-      phoneNumber: raw.customer?.number || raw.phoneNumber || '',
+      phoneNumber,
       duration,
       status,
       outcome,

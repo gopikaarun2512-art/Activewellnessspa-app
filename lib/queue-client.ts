@@ -1,4 +1,4 @@
-import { QueuedCall } from '@/types/analytics';
+import { QueuedCall, ScheduledCallback, CompletedCall } from '@/types/analytics';
 
 const N8N_WEBHOOK_BASE = process.env.NEXT_PUBLIC_N8N_WEBHOOK_BASE || '';
 const QUEUE_WEBHOOK_PATH = process.env.NEXT_PUBLIC_QUEUE_WEBHOOK_PATH || '/call-queue-api';
@@ -303,17 +303,155 @@ export class QueueClient {
           vapiCallId: row.vapi_call_id,
           callOutcome: row.call_outcome,
           batchPosition: row.batch_position,
-        } as QueuedCall & {
-          status?: string;
-          email?: string;
-          contactId?: string;
-          opportunityId?: string;
-          attempts?: number;
-          vapiCallId?: string;
-          callOutcome?: string;
-          batchPosition?: number;
-        };
+          callbackReason: row.callback_reason,
+        } as QueuedCall;
       });
+  }
+
+  /**
+   * Get scheduled callbacks - calls where callback was requested
+   * These have status 'scheduled_with_vapi' or callback_reason set
+   */
+  async getScheduledCallbacks(): Promise<ScheduledCallback[]> {
+    const allCalls = await this.getQueue();
+
+    // Filter for callbacks
+    const callbacks = allCalls.filter(call => {
+      const status = (call.status || '').toLowerCase();
+      const callbackReason = call.callbackReason;
+
+      // Include if scheduled with VAPI for callback OR has a callback reason
+      return status.includes('scheduled_with_vapi') ||
+             status.includes('callback') ||
+             (callbackReason && callbackReason.trim() !== '');
+    });
+
+    return callbacks.map(call => ({
+      id: call.id,
+      phone: call.phone,
+      leadName: call.leadName,
+      type: call.type,
+      scheduledAt: call.estimatedCallTime || call.queuedAt,
+      originalCallTime: call.queuedAt,
+      callbackReason: call.callbackReason || 'Callback requested',
+      priority: call.priority,
+      vapiCallId: call.vapiCallId,
+      email: call.email,
+    }));
+  }
+
+  /**
+   * Get completed/instantly called - calls that have been processed
+   * These have a call outcome or VAPI call ID with completed status
+   */
+  async getCompletedCalls(): Promise<CompletedCall[]> {
+    const allCalls = await this.getQueue();
+
+    // Statuses that indicate the call has been completed
+    const completedStatuses = [
+      'completed', 'done', 'called', 'success',
+      'no_answer', 'voicemail', 'not_interested',
+      'busy', 'wrong_number', 'callback_completed'
+    ];
+
+    // Filter for completed calls
+    const completed = allCalls.filter(call => {
+      const status = (call.status || '').toLowerCase();
+      const callOutcome = (call.callOutcome || '').toLowerCase();
+
+      // Include if has completed status OR has a call outcome
+      return completedStatuses.some(cs => status.includes(cs)) ||
+             (callOutcome && callOutcome.trim() !== '');
+    });
+
+    return completed.map(call => ({
+      id: call.id,
+      phone: call.phone,
+      leadName: call.leadName,
+      type: call.type,
+      calledAt: call.queuedAt,
+      callOutcome: call.callOutcome || call.status || 'completed',
+      vapiCallId: call.vapiCallId,
+      email: call.email,
+    }));
+  }
+
+  /**
+   * Get all call data separated into categories
+   */
+  async getSeparatedCallData(): Promise<{
+    queuedCalls: QueuedCall[];
+    scheduledCallbacks: ScheduledCallback[];
+    completedCalls: CompletedCall[];
+  }> {
+    const allCalls = await this.getQueue();
+
+    // Statuses that indicate completion
+    const completedStatuses = [
+      'completed', 'done', 'called', 'success', 'failed', 'cancelled',
+      'no_answer', 'voicemail', 'not_interested', 'ended', 'error',
+      'busy', 'wrong_number', 'callback_completed'
+    ];
+
+    // Filter for stale entries - items older than 24 hours
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+    const queuedCalls: QueuedCall[] = [];
+    const scheduledCallbacks: ScheduledCallback[] = [];
+    const completedCalls: CompletedCall[] = [];
+
+    for (const call of allCalls) {
+      const status = (call.status || '').toLowerCase();
+      const callOutcome = (call.callOutcome || '').toLowerCase();
+      const callbackReason = call.callbackReason;
+      const queuedAt = new Date(call.queuedAt);
+      const isStale = queuedAt < twentyFourHoursAgo;
+
+      // Check if this is a scheduled callback
+      const isCallback = status.includes('scheduled_with_vapi') ||
+                         status.includes('callback') ||
+                         (callbackReason && callbackReason.trim() !== '');
+
+      // Check if completed
+      const isCompleted = completedStatuses.some(cs => status.includes(cs)) ||
+                          (callOutcome && callOutcome.trim() !== '');
+
+      if (isCallback && !status.includes('callback_completed')) {
+        // This is a scheduled callback that hasn't been completed yet
+        scheduledCallbacks.push({
+          id: call.id,
+          phone: call.phone,
+          leadName: call.leadName,
+          type: call.type,
+          scheduledAt: call.estimatedCallTime || call.queuedAt,
+          originalCallTime: call.queuedAt,
+          callbackReason: callbackReason || 'Callback requested',
+          priority: call.priority,
+          vapiCallId: call.vapiCallId,
+          email: call.email,
+        });
+      } else if (isCompleted) {
+        // This call has been completed
+        completedCalls.push({
+          id: call.id,
+          phone: call.phone,
+          leadName: call.leadName,
+          type: call.type,
+          calledAt: call.queuedAt,
+          callOutcome: call.callOutcome || call.status || 'completed',
+          vapiCallId: call.vapiCallId,
+          email: call.email,
+        });
+      } else if (!isStale) {
+        // This is a pending/queued call (not stale, not completed, not callback)
+        queuedCalls.push(call);
+      }
+    }
+
+    console.log(`[Queue Separation] Total: ${allCalls.length}, Queued: ${queuedCalls.length}, Callbacks: ${scheduledCallbacks.length}, Completed: ${completedCalls.length}`);
+
+    return { queuedCalls, scheduledCallbacks, completedCalls };
   }
 }
 
