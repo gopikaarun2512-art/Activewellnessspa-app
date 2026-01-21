@@ -173,19 +173,29 @@ export class VAPIClient {
       summary = raw.artifact.summary;
     }
 
-    // Extract phone number - handle both string and object formats
-    // VAPI can return phoneNumber as object: {id, orgId, number, provider, ...}
+    // Extract phone number - prioritize customer phone from assistantOverrides
+    // For outbound calls, the actual customer phone is passed in assistantOverrides.variableValues.phone
+    // raw.phoneNumber is VAPI's outbound phone line, NOT the customer's phone!
     let phoneNumber = '';
-    if (raw.customer?.number) {
+
+    // PRIORITY 1: Check assistantOverrides.variableValues.phone (actual customer phone for outbound calls)
+    if (overrides.phone) {
+      phoneNumber = overrides.phone;
+    }
+    // PRIORITY 2: Check customer.number (for inbound calls)
+    else if (raw.customer?.number) {
       phoneNumber = raw.customer.number;
-    } else if (typeof raw.phoneNumber === 'string') {
+    }
+    // PRIORITY 3: Check customer.phone
+    else if (raw.customer?.phone) {
+      phoneNumber = raw.customer.phone;
+    }
+    // FALLBACK: Only use raw.phoneNumber if nothing else available
+    // Note: This is usually VAPI's phone line, not the customer's number
+    else if (typeof raw.phoneNumber === 'string') {
       phoneNumber = raw.phoneNumber;
     } else if (raw.phoneNumber?.number) {
-      // Handle case where phoneNumber is an object with a 'number' property
       phoneNumber = raw.phoneNumber.number;
-    } else if (raw.phoneNumberId) {
-      // Fallback to ID if actual number not available
-      phoneNumber = raw.phoneNumberId;
     }
 
     return {
