@@ -254,9 +254,9 @@ function DashboardContent() {
                 <FacebookLeadsPanel facebookLeads={filteredFacebookLeads} />
               </div>
 
-              {/* Detailed Call Summaries */}
+              {/* Detailed Call Summaries - shows all VAPI calls with summaries */}
               <div className="stagger-item">
-                <DetailedCallSummaries activities={filteredActivities} />
+                <DetailedCallSummaries vapiCalls={data.dashboard.vapiCalls || []} />
               </div>
             </div>
           </div>

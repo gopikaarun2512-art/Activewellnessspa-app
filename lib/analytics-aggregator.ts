@@ -14,6 +14,7 @@ import {
   QueuedCall,
   ScheduledCallback,
   CompletedCall,
+  VAPICall,
   FacebookLead,
 } from '@/types/analytics';
 import { subDays } from 'date-fns';
@@ -211,6 +212,11 @@ export class AnalyticsAggregator {
     const scheduledCallbacks = this.sortScheduledCallbacks(separatedCallData.scheduledCallbacks);
     const completedCalls = this.sortCompletedCalls(separatedCallData.completedCalls);
 
+    // Sort VAPI calls by time (most recent first) for call summaries display
+    const sortedVapiCalls = [...vapiCalls].sort((a, b) =>
+      new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+
     return {
       metrics,
       callVolume,
@@ -219,6 +225,7 @@ export class AnalyticsAggregator {
       queuedCalls,
       scheduledCallbacks,
       completedCalls,
+      vapiCalls: sortedVapiCalls,
       facebookLeads,
       lastUpdated: new Date().toISOString(),
     };

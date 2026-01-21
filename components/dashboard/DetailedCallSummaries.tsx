@@ -1,15 +1,15 @@
 'use client';
 
-import { Activity } from '@/types/analytics';
-import { formatShortTimeAWST } from '@/lib/timezone';
+import { VAPICall } from '@/types/analytics';
+import { formatShortTimeAWST, formatDateTimeShortAWST } from '@/lib/timezone';
 
 interface DetailedCallSummariesProps {
-  activities: Activity[];
+  vapiCalls: VAPICall[];
 }
 
-export default function DetailedCallSummaries({ activities }: DetailedCallSummariesProps) {
-  // Filter activities that have call summaries
-  const callsWithSummaries = activities.filter(activity => activity.callSummary && activity.callSummary.trim().length > 0);
+export default function DetailedCallSummaries({ vapiCalls }: DetailedCallSummariesProps) {
+  // Filter VAPI calls that have summaries
+  const callsWithSummaries = vapiCalls.filter(call => call.summary && call.summary.trim().length > 0);
 
   if (callsWithSummaries.length === 0) {
     return (
@@ -73,47 +73,44 @@ export default function DetailedCallSummaries({ activities }: DetailedCallSummar
 
       {/* Call Summary Cards */}
       <div className="divide-y divide-gray-200 dark:divide-gray-700">
-        {callsWithSummaries.map((activity) => (
+        {callsWithSummaries.map((call) => (
           <div
-            key={activity.id}
+            key={call.id}
             className="p-6 hover:bg-wellness-50/30 dark:hover:bg-wellness-900/5 transition-colors"
           >
             {/* Lead Name Header */}
             <div className="flex items-start justify-between mb-4">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {activity.leadName}
+                {call.leadName || 'Unknown Caller'}
               </h3>
               <span className="text-sm text-gray-500 dark:text-gray-400">
-                {formatShortTimeAWST(activity.time)}
+                {formatDateTimeShortAWST(call.startedAt)}
               </span>
             </div>
 
             {/* Contact Information */}
             <div className="flex flex-wrap gap-4 mb-4">
-              {/* Email */}
-              {activity.email && (
-                <a
-                  href={`mailto:${activity.email}`}
-                  className="flex items-center gap-2 text-sm text-wellness-600 dark:text-wellness-400 hover:text-wellness-700 dark:hover:text-wellness-300 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                  <span className="underline">{activity.email}</span>
-                </a>
-              )}
-
               {/* Phone */}
               <a
-                href={`tel:${activity.phone}`}
+                href={`tel:${call.phoneNumber}`}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-white bg-wellness-600 hover:bg-wellness-700 dark:bg-wellness-900 dark:hover:bg-wellness-600 transition-colors font-medium shadow-sm"
                 title="Click to call"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                 </svg>
-                <span>{activity.phone}</span>
+                <span>{call.phoneNumber}</span>
               </a>
+
+              {/* Duration */}
+              {call.duration > 0 && (
+                <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>{Math.floor(call.duration / 60)}:{(call.duration % 60).toString().padStart(2, '0')}</span>
+                </span>
+              )}
             </div>
 
             {/* Badges */}
@@ -121,12 +118,12 @@ export default function DetailedCallSummaries({ activities }: DetailedCallSummar
               {/* Call Type Badge */}
               <span className={`
                 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide
-                ${activity.type === 'outbound'
+                ${call.type === 'outbound'
                   ? 'bg-wellness-100 dark:bg-wellness-900/30 text-wellness-800 dark:text-wellness-neutral-300'
                   : 'bg-wellness-blue-100 dark:bg-wellness-blue-900/30 text-wellness-blue-700 dark:text-wellness-blue-300'
                 }
               `}>
-                {activity.type === 'outbound' ? (
+                {call.type === 'outbound' ? (
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                   </svg>
@@ -135,59 +132,51 @@ export default function DetailedCallSummaries({ activities }: DetailedCallSummar
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10H11a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
                   </svg>
                 )}
-                {activity.type}
+                {call.type}
               </span>
 
-              {/* Link Sent Badge - shows when call outcome is booking_link_sent */}
-              {activity.outcome === 'linkSent' && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+              {/* Status Badge */}
+              <span className={`
+                inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide
+                ${call.status === 'completed'
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                  : call.status === 'voicemail'
+                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                  : call.status === 'no-answer'
+                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  : 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300'
+                }
+              `}>
+                {call.status === 'completed' && (
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  Link Sent
-                </span>
-              )}
+                )}
+                {call.status}
+              </span>
 
-              {/* Booked Badge - shows when GymMaster confirms booking (is_booked === true) */}
-              {activity.outcome === 'booked' && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Booked (GymMaster)
+              {/* Outcome Badge (if different from status) */}
+              {call.outcome && call.outcome !== call.status && (
+                <span className={`
+                  inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide
+                  ${call.outcome.includes('booking') || call.outcome.includes('link')
+                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                    : call.outcome.includes('booked')
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300'
+                  }
+                `}>
+                  {call.outcome.replace(/_/g, ' ')}
                 </span>
               )}
             </div>
 
             {/* Call Summary Text */}
             <div className="bg-gradient-to-br from-wellness-50/50 to-wellness-100/50 dark:from-wellness-900/10 dark:to-wellness-800/10 rounded-lg p-4 border border-wellness-200/50 dark:border-wellness-700/30">
-              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                {activity.callSummary}
+              <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                {call.summary}
               </p>
             </div>
-
-            {/* Lead Score (if available) */}
-            {activity.leadScore !== undefined && activity.leadScore > 0 && (
-              <div className="mt-4 flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Lead Score:</span>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden w-24">
-                    <div
-                      className={`h-full rounded-full ${
-                        activity.leadScore >= 80 ? 'bg-wellness-600' :
-                        activity.leadScore >= 60 ? 'bg-wellness-900' :
-                        activity.leadScore >= 40 ? 'bg-wellness-600' :
-                        'bg-gray-400'
-                      }`}
-                      style={{ width: `${activity.leadScore}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900 dark:text-white">
-                    {activity.leadScore}
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         ))}
       </div>

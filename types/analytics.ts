@@ -90,6 +90,7 @@ export interface DashboardData {
   queuedCalls: QueuedCall[];           // Calls waiting in queue (not yet called)
   scheduledCallbacks: ScheduledCallback[];  // Callbacks scheduled for later
   completedCalls: CompletedCall[];      // Calls that have been made (instantly called)
+  vapiCalls: VAPICall[];               // All VAPI calls for the day (with summaries)
   facebookLeads: FacebookLead[];
   lastUpdated: string;
 }
