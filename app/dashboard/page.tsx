@@ -415,6 +415,7 @@ function DashboardContent() {
         <aside className="w-full lg:w-96 order-1 lg:order-2">
           <TodaysScheduleSidebar
             queuedCalls={data.dashboard.queuedCalls}
+            scheduledCallbacks={data.dashboard.scheduledCallbacks || []}
             recentActivity={filteredActivities}
             facebookLeads={filteredFacebookLeads}
             totalCalls={data.dashboard.metrics.totalCalls}

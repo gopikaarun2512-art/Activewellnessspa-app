@@ -1,19 +1,33 @@
 'use client';
 
-import { QueuedCall, Activity, FacebookLead } from '@/types/analytics';
+import { QueuedCall, Activity, FacebookLead, ScheduledCallback } from '@/types/analytics';
 import { addMinutes } from 'date-fns';
 import { formatInAWST, formatShortTimeAWST } from '@/lib/timezone';
 
 interface TodaysScheduleSidebarProps {
   queuedCalls: QueuedCall[];
+  scheduledCallbacks: ScheduledCallback[];
   recentActivity: Activity[];
   facebookLeads: FacebookLead[];
   totalCalls: number;
   totalBookings: number;
 }
 
+// Unified type for "Up Next" items
+interface UpNextItem {
+  id: string;
+  type: 'queued' | 'callback';
+  leadName: string;
+  phone: string;
+  scheduledTime: Date;
+  description: string;
+  priority?: 'high' | 'medium' | 'low';
+  callbackReason?: string;
+}
+
 export default function TodaysScheduleSidebar({
   queuedCalls,
+  scheduledCallbacks,
   recentActivity,
   facebookLeads,
   totalCalls,
@@ -22,14 +36,42 @@ export default function TodaysScheduleSidebar({
   // Use actual UTC time for calculations - formatShortTimeAWST will convert to AWST
   const nowUTC = new Date();
 
-  // Get next 3 upcoming calls from queue
-  const upcomingCalls = queuedCalls.slice(0, 3);
+  // Build unified "Up Next" list from queued calls and scheduled callbacks
+  const upNextItems: UpNextItem[] = [];
 
-  // Calculate estimated time for each queued call (assuming 10 min per call)
-  // Pass UTC time to addMinutes, then formatShortTimeAWST will display in AWST
-  const getEstimatedTime = (index: number) => {
-    return addMinutes(nowUTC, index * 10);
-  };
+  // Add queued calls with estimated times (assuming 10 min per call)
+  queuedCalls.forEach((call, index) => {
+    upNextItems.push({
+      id: call.id,
+      type: 'queued',
+      leadName: call.leadName,
+      phone: call.phone,
+      scheduledTime: addMinutes(nowUTC, index * 10),
+      description: 'New FB lead - waiting in queue',
+      priority: call.priority,
+    });
+  });
+
+  // Add scheduled callbacks
+  scheduledCallbacks.forEach((callback) => {
+    const scheduledTime = new Date(callback.scheduledAt);
+    upNextItems.push({
+      id: callback.id,
+      type: 'callback',
+      leadName: callback.leadName,
+      phone: callback.phone,
+      scheduledTime,
+      description: callback.callbackReason || 'Requested callback',
+      priority: callback.priority,
+      callbackReason: callback.callbackReason,
+    });
+  });
+
+  // Sort by scheduled time (earliest first)
+  upNextItems.sort((a, b) => a.scheduledTime.getTime() - b.scheduledTime.getTime());
+
+  // Get top 5 upcoming items
+  const upcomingItems = upNextItems.slice(0, 5);
 
   // Get recent successful bookings today
   const todaysBookings = recentActivity.filter(a => a.outcome === 'booked').slice(0, 3);
@@ -100,19 +142,19 @@ export default function TodaysScheduleSidebar({
           </div>
         </div>
 
-        {/* Upcoming Calls */}
+        {/* Up Next - Unified Queued Calls & Scheduled Callbacks */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-wellness-neutral-400 dark:border-gray-700 shadow-sm overflow-hidden">
           <div className="bg-gradient-to-r from-wellness-500 to-wellness-600 px-5 py-3">
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Up Next ({upcomingCalls.length})
+              Up Next ({upcomingItems.length})
             </h3>
           </div>
 
           <div className="divide-y divide-gray-200 dark:divide-gray-700">
-            {upcomingCalls.length === 0 ? (
+            {upcomingItems.length === 0 ? (
               <div className="px-5 py-8 text-center">
                 <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-wellness-100 dark:bg-wellness-900/30 flex items-center justify-center">
                   <svg className="w-6 h-6 text-wellness-600 dark:text-wellness-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -120,32 +162,56 @@ export default function TodaysScheduleSidebar({
                   </svg>
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-300 font-medium">All caught up!</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">No pending calls in queue</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">No pending calls or callbacks</p>
               </div>
             ) : (
-              upcomingCalls.map((call, index) => (
-                <div key={call.id} className="px-5 py-4 hover:bg-wellness-50 dark:hover:bg-wellness-900/10 transition-colors">
+              upcomingItems.map((item, index) => (
+                <div key={item.id} className="px-5 py-4 hover:bg-wellness-50 dark:hover:bg-wellness-900/10 transition-colors">
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-wellness-500 text-white text-xs font-bold">
+                        {/* Number badge with different color for callbacks */}
+                        <span className={`flex items-center justify-center w-6 h-6 rounded-full text-white text-xs font-bold ${
+                          item.type === 'callback' ? 'bg-amber-500' : 'bg-wellness-500'
+                        }`}>
                           {index + 1}
                         </span>
                         <p className="font-semibold text-gray-900 dark:text-white text-sm">
-                          {call.leadName}
+                          {item.leadName}
                         </p>
-                        {getPriorityBadge(call.priority)}
+                        {/* Type badge */}
+                        {item.type === 'callback' ? (
+                          <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-full">
+                            Callback
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-full">
+                            Queue
+                          </span>
+                        )}
+                        {getPriorityBadge(item.priority)}
                       </div>
                       <p className="text-xs text-gray-600 dark:text-gray-300 font-mono ml-8">
-                        {call.phone}
+                        {item.phone}
                       </p>
                     </div>
                   </div>
-                  <div className="ml-8 flex items-center gap-2 text-xs text-wellness-600 dark:text-wellness-400">
+                  {/* Description */}
+                  <div className="ml-8 mb-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                      {item.description}
+                    </p>
+                  </div>
+                  {/* Time */}
+                  <div className={`ml-8 flex items-center gap-2 text-xs ${
+                    item.type === 'callback' ? 'text-amber-600 dark:text-amber-400' : 'text-wellness-600 dark:text-wellness-400'
+                  }`}>
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <span className="font-medium">~{formatShortTimeAWST(getEstimatedTime(index))}</span>
+                    <span className="font-medium">
+                      {item.type === 'callback' ? '' : '~'}{formatShortTimeAWST(item.scheduledTime)}
+                    </span>
                   </div>
                 </div>
               ))
@@ -242,7 +308,7 @@ export default function TodaysScheduleSidebar({
           </div>
         )}
 
-        {/* Quick Actions */}
+        {/* Quick Stats */}
         <div className="bg-gradient-to-br from-wellness-500 to-wellness-600 rounded-xl p-5 text-white shadow-lg">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -262,8 +328,12 @@ export default function TodaysScheduleSidebar({
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-wellness-100">Queue Remaining</span>
+              <span className="text-wellness-100">In Queue</span>
               <span className="font-bold text-lg">{queuedCalls.length}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-wellness-100">Callbacks</span>
+              <span className="font-bold text-lg">{scheduledCallbacks.length}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-wellness-100">FB Leads Today</span>
