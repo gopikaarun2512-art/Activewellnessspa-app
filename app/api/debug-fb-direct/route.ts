@@ -60,8 +60,11 @@ export async function GET() {
     endOfDayUTC: now.toISOString(),
   };
 
-  // Test getting leadgen forms
+  // Test getting leadgen forms using the Page-specific token
+  const pageAccessToken = results.availablePages?.data?.[0]?.access_token;
+
   try {
+    // First try with the main token
     const forms = await facebookAPIClient.getLeadgenForms();
     results.forms = {
       success: true,
@@ -78,6 +81,18 @@ export async function GET() {
       success: false,
       error: error.message,
     };
+  }
+
+  // Also try with the page-specific access token
+  if (pageAccessToken) {
+    try {
+      const formsUrl = `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/leadgen_forms?fields=id,name,leads_count,status&access_token=${pageAccessToken}`;
+      const formsResponse = await fetch(formsUrl);
+      const formsData = await formsResponse.json();
+      results.formsWithPageToken = formsData;
+    } catch (error: any) {
+      results.formsWithPageToken = { error: error.message };
+    }
   }
 
   // Test getting leads for today
