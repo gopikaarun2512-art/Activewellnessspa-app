@@ -89,7 +89,16 @@ export class FacebookLeadsClient {
         }
       });
 
-      console.log(`Extracted ${facebookLeads.length} Facebook leads`);
+      console.log(`[FB Leads] Extracted ${facebookLeads.length} Facebook leads`);
+
+      // Log sample createdTime values for debugging
+      if (facebookLeads.length > 0) {
+        console.log('[FB Leads] Sample createdTime values:', facebookLeads.slice(0, 3).map(l => ({
+          name: l.name,
+          createdTime: l.createdTime,
+          createdTimeParsed: new Date(l.createdTime).toISOString(),
+        })));
+      }
 
       // Filter to date range (client-side)
       const filteredLeads = facebookLeads.filter((lead) => {
