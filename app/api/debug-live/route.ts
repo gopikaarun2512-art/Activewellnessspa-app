@@ -19,12 +19,30 @@ export async function GET() {
     errors: [],
   };
 
-  // Get date range for today
+  // Get date range for today using AWST midnight-to-midnight (same as dashboard)
   const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
+
+  // Get current date in AWST using Intl API
+  const awstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Perth',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const awstDateStr = awstFormatter.format(now); // YYYY-MM-DD in AWST
+  const [year, month, day] = awstDateStr.split('-').map(Number);
+
+  // AWST midnight = UTC 16:00 previous day (midnight - 8 hours = 16:00 UTC previous day)
+  const startOfDay = new Date(Date.UTC(year, month - 1, day - 1, 16, 0, 0, 0));
+  const endOfDay = now; // Current time as end
+
+  results.dateRange = {
+    awstDate: awstDateStr,
+    startOfDayUTC: startOfDay.toISOString(),
+    startOfDayAWST: startOfDay.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+    endOfDayUTC: endOfDay.toISOString(),
+    endOfDayAWST: endOfDay.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+  };
 
   // 1. Test Google Sheets Queue
   try {

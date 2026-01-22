@@ -178,6 +178,15 @@ export class AnalyticsAggregator {
     // Use midnight-to-midnight AWST boundaries for all data (12:00 AM to 11:59 PM AWST)
     const { startDate, endDate } = getAWSTMidnightBoundaries(dateRange as DateRangeType);
 
+    // Debug: Log date range being used
+    console.log('[Analytics] Date range for data fetch:', {
+      dateRange,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      startDateLocal: startDate.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+      endDateLocal: endDate.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+    });
+
     // Fetch data from all sources in parallel
     // Primary queue source: Google Sheet via n8n webhook (with fallback)
     // Bookings: From n8n execution data (is_booked flag) - tracks FB ad leads only

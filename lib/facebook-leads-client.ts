@@ -36,6 +36,14 @@ export class FacebookLeadsClient {
    */
   async getLeads(startDate: Date, endDate: Date): Promise<FacebookLead[]> {
     try {
+      // Debug: Log the date range being requested
+      console.log('[FB Leads] Fetching leads for date range:', {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        startDateAWST: startDate.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+        endDateAWST: endDate.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
+      });
+
       // Check if n8n API is configured
       if (!this.n8nBaseUrl || !this.apiKey) {
         console.log('n8n API not configured for Facebook leads');
@@ -86,10 +94,23 @@ export class FacebookLeadsClient {
       // Filter to date range (client-side)
       const filteredLeads = facebookLeads.filter((lead) => {
         const leadDate = new Date(lead.createdTime);
-        return leadDate >= startDate && leadDate <= endDate;
+        const isInRange = leadDate >= startDate && leadDate <= endDate;
+        if (!isInRange && facebookLeads.length < 10) {
+          // Log filtered out leads for debugging (only if small count)
+          console.log(`[FB Leads] Lead filtered out:`, {
+            name: lead.name,
+            createdTime: lead.createdTime,
+            leadDateISO: leadDate.toISOString(),
+            startDateISO: startDate.toISOString(),
+            endDateISO: endDate.toISOString(),
+            afterStart: leadDate >= startDate,
+            beforeEnd: leadDate <= endDate,
+          });
+        }
+        return isInRange;
       });
 
-      console.log(`Filtered to ${filteredLeads.length} leads in date range`);
+      console.log(`[FB Leads] Filtered to ${filteredLeads.length} leads in date range (from ${facebookLeads.length} total)`);
 
       // Sort by created time (most recent first)
       return filteredLeads.sort((a, b) =>
