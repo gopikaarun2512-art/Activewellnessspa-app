@@ -22,6 +22,26 @@ export async function GET() {
     }, { status: 400 });
   }
 
+  // Test what type of object the Page ID is
+  try {
+    const pageInfoUrl = `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}?fields=id,name,category,fan_count,about&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`;
+    const pageResponse = await fetch(pageInfoUrl);
+    const pageData = await pageResponse.json();
+    results.pageInfo = pageData;
+  } catch (error: any) {
+    results.pageInfo = { error: error.message };
+  }
+
+  // Also try to get accounts (pages) that this token has access to
+  try {
+    const accountsUrl = `https://graph.facebook.com/v18.0/me/accounts?access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`;
+    const accountsResponse = await fetch(accountsUrl);
+    const accountsData = await accountsResponse.json();
+    results.availablePages = accountsData;
+  } catch (error: any) {
+    results.availablePages = { error: error.message };
+  }
+
   // Get AWST date range
   const now = new Date();
   const awstFormatter = new Intl.DateTimeFormat('en-CA', {
