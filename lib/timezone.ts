@@ -98,6 +98,11 @@ export function formatInAWST(date: Date | string, formatStr: string): string {
     options.hour = 'numeric';
     options.minute = '2-digit';
     options.hour12 = true;
+  } else if (formatStr === 'EEEE, MMMM d') {
+    // "Wednesday, January 22"
+    options.weekday = 'long';
+    options.month = 'long';
+    options.day = 'numeric';
   } else if (formatStr === 'EEEE, MMMM d, yyyy') {
     options.weekday = 'long';
     options.month = 'long';
@@ -110,6 +115,11 @@ export function formatInAWST(date: Date | string, formatStr: string): string {
     // Return in ISO format
     const parts = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: 'Australia/Perth' }).format(inputDate);
     return parts;
+  } else if (formatStr === 'HH:mm' || formatStr === 'H:mm') {
+    // 24-hour time format
+    options.hour = '2-digit';
+    options.minute = '2-digit';
+    options.hour12 = false;
   } else {
     // Fallback to date-fns format with shifted date
     const awstDate = toAWST(inputDate);

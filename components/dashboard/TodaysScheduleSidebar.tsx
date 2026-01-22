@@ -2,7 +2,7 @@
 
 import { QueuedCall, Activity, FacebookLead } from '@/types/analytics';
 import { addMinutes } from 'date-fns';
-import { formatInAWST, formatShortTimeAWST, getNowInAWST } from '@/lib/timezone';
+import { formatInAWST, formatShortTimeAWST } from '@/lib/timezone';
 
 interface TodaysScheduleSidebarProps {
   queuedCalls: QueuedCall[];
@@ -19,15 +19,16 @@ export default function TodaysScheduleSidebar({
   totalCalls,
   totalBookings,
 }: TodaysScheduleSidebarProps) {
-  const now = getNowInAWST();
-  const currentHour = now.getHours();
+  // Use actual UTC time for calculations - formatShortTimeAWST will convert to AWST
+  const nowUTC = new Date();
 
   // Get next 3 upcoming calls from queue
   const upcomingCalls = queuedCalls.slice(0, 3);
 
   // Calculate estimated time for each queued call (assuming 10 min per call)
+  // Pass UTC time to addMinutes, then formatShortTimeAWST will display in AWST
   const getEstimatedTime = (index: number) => {
-    return addMinutes(now, index * 10);
+    return addMinutes(nowUTC, index * 10);
   };
 
   // Get recent successful bookings today
@@ -54,7 +55,7 @@ export default function TodaysScheduleSidebar({
           <h2 className="text-xl font-bold text-white dark:text-wellness-neutral-100">Today's Schedule</h2>
         </div>
         <p className="text-white/90 dark:text-wellness-neutral-300 text-sm">
-          {formatInAWST(now, 'EEEE, MMMM d')} (AWST)
+          {formatInAWST(nowUTC, 'EEEE, MMMM d')} (AWST)
         </p>
       </div>
 
