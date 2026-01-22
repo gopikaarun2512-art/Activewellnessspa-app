@@ -77,6 +77,10 @@ function DashboardContent() {
   // Track current AWST date to detect midnight rollover
   const currentAWSTDateRef = useRef<string>(getCurrentAWSTDate());
 
+  // Track VAPI call count for detecting new scheduled calls
+  const vapiCallCountRef = useRef<number>(0);
+  const vapiLatestCallIdRef = useRef<string | null>(null);
+
   const fetchData = useCallback(async (isRefresh = false, dateRange?: DateRange, forceRefresh = false) => {
     try {
       if (isRefresh) {
@@ -163,6 +167,46 @@ function DashboardContent() {
 
     // Check every minute as a backup
     const interval = setInterval(checkDateChange, 60000);
+    return () => clearInterval(interval);
+  }, [fetchData, showToast]);
+
+  // VAPI call polling: Detect new scheduled/completed calls and refresh dashboard
+  useEffect(() => {
+    const pollVapiCalls = async () => {
+      try {
+        const params = new URLSearchParams();
+        if (vapiLatestCallIdRef.current) {
+          params.append('lastCallId', vapiLatestCallIdRef.current);
+        }
+        params.append('lastCount', vapiCallCountRef.current.toString());
+
+        const response = await fetch(`/api/vapi-poll?${params}`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        // Update tracked values
+        const previousCount = vapiCallCountRef.current;
+        vapiCallCountRef.current = data.count;
+        vapiLatestCallIdRef.current = data.latestCallId;
+
+        // If new calls detected, refresh the dashboard
+        if (data.hasNewCalls && previousCount > 0) {
+          console.log(`[Dashboard] New VAPI call detected! Count: ${previousCount} -> ${data.count}`);
+          fetchData(true);
+          showToast('New call detected - Dashboard updated', 'info');
+        }
+      } catch (error) {
+        console.error('[Dashboard] VAPI poll error:', error);
+      }
+    };
+
+    // Poll every 10 seconds for new calls (more frequent than general refresh)
+    const interval = setInterval(pollVapiCalls, 10000);
+
+    // Initial poll to set baseline
+    pollVapiCalls();
+
     return () => clearInterval(interval);
   }, [fetchData, showToast]);
 

@@ -233,6 +233,52 @@ export class VAPIClient {
 
     return this.getCalls(today, endOfToday);
   }
+
+  /**
+   * Get the count of calls for today (AWST)
+   * Used for detecting new scheduled/completed calls
+   */
+  async getTodaysCallCount(): Promise<{ count: number; latestCallId: string | null; latestCallTime: string | null }> {
+    // Get current date in AWST
+    const now = new Date();
+    const awstFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Australia/Perth',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const awstDateStr = awstFormatter.format(now);
+    const [year, month, day] = awstDateStr.split('-').map(Number);
+
+    // AWST midnight in UTC
+    const startOfDay = new Date(Date.UTC(year, month - 1, day - 1, 16, 0, 0, 0));
+
+    const calls = await this.getCalls(startOfDay, now);
+
+    return {
+      count: calls.length,
+      latestCallId: calls.length > 0 ? calls[0].id : null,
+      latestCallTime: calls.length > 0 ? calls[0].startedAt : null,
+    };
+  }
+
+  /**
+   * Check if there are new calls since a given call ID
+   */
+  async hasNewCallsSince(lastKnownCallId: string | null, lastKnownCount: number): Promise<boolean> {
+    const current = await this.getTodaysCallCount();
+
+    // New calls detected if count increased or latest call ID changed
+    if (current.count > lastKnownCount) {
+      return true;
+    }
+
+    if (lastKnownCallId && current.latestCallId && current.latestCallId !== lastKnownCallId) {
+      return true;
+    }
+
+    return false;
+  }
 }
 
 export const vapiClient = new VAPIClient();
