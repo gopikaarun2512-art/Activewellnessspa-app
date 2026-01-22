@@ -1,4 +1,5 @@
 import { FacebookLead } from '@/types/analytics';
+import { facebookAPIClient } from './facebook-api-client';
 
 const N8N_API_URL = process.env.N8N_API_URL || '';
 const N8N_API_KEY = process.env.N8N_API_KEY || '';
@@ -10,6 +11,13 @@ export class FacebookLeadsClient {
   constructor() {
     this.n8nBaseUrl = N8N_API_URL;
     this.apiKey = N8N_API_KEY;
+  }
+
+  /**
+   * Check if direct Facebook API is configured
+   */
+  private isDirectFBConfigured(): boolean {
+    return facebookAPIClient.isConfigured();
   }
 
   private async fetchN8N(endpoint: string, options: RequestInit = {}) {
@@ -32,7 +40,8 @@ export class FacebookLeadsClient {
   }
 
   /**
-   * Get Facebook leads for a specific date range from n8n workflow executions
+   * Get Facebook leads for a specific date range
+   * Priority: Direct Facebook API (if configured) > n8n workflow executions
    */
   async getLeads(startDate: Date, endDate: Date): Promise<FacebookLead[]> {
     try {
@@ -44,9 +53,26 @@ export class FacebookLeadsClient {
         endDateAWST: endDate.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }),
       });
 
+      // Try direct Facebook API first (if configured)
+      if (this.isDirectFBConfigured()) {
+        console.log('[FB Leads] Using direct Facebook API');
+        try {
+          const directLeads = await facebookAPIClient.getLeads(startDate, endDate);
+          if (directLeads.length > 0) {
+            console.log(`[FB Leads] Got ${directLeads.length} leads from direct Facebook API`);
+            // Enrich with journey data from n8n if available
+            return await this.enrichLeadsWithN8NJourneyData(directLeads, startDate, endDate);
+          }
+          console.log('[FB Leads] No leads from direct Facebook API, falling back to n8n');
+        } catch (fbError) {
+          console.error('[FB Leads] Direct Facebook API failed, falling back to n8n:', fbError);
+        }
+      }
+
+      // Fallback to n8n workflow executions
       // Check if n8n API is configured
       if (!this.n8nBaseUrl || !this.apiKey) {
-        console.log('n8n API not configured for Facebook leads');
+        console.log('[FB Leads] n8n API not configured for Facebook leads');
         return [];
       }
 
@@ -457,6 +483,148 @@ export class FacebookLeadsClient {
     if (normalized.includes('not') || normalized.includes('reject')) return 'not_interested';
 
     return 'new';
+  }
+
+  /**
+   * Enrich leads from direct Facebook API with journey data from n8n executions
+   * Matches leads by phone number to find journey information
+   */
+  private async enrichLeadsWithN8NJourneyData(
+    leads: FacebookLead[],
+    startDate: Date,
+    endDate: Date
+  ): Promise<FacebookLead[]> {
+    // If n8n is not configured, return leads as-is
+    if (!this.n8nBaseUrl || !this.apiKey) {
+      console.log('[FB Leads] n8n not configured, returning leads without journey enrichment');
+      return leads;
+    }
+
+    try {
+      // Get journey data from n8n executions
+      const n8nLeads = await this.getLeadsFromN8N(startDate, endDate);
+
+      if (n8nLeads.length === 0) {
+        console.log('[FB Leads] No n8n journey data found');
+        return leads;
+      }
+
+      // Create a map of phone -> journey data for quick lookup
+      const journeyByPhone = new Map<string, FacebookLead['journey']>();
+      const journeyByLeadId = new Map<string, FacebookLead['journey']>();
+
+      n8nLeads.forEach(n8nLead => {
+        if (n8nLead.journey) {
+          if (n8nLead.phone) {
+            const normalizedPhone = this.normalizePhone(n8nLead.phone);
+            journeyByPhone.set(normalizedPhone, n8nLead.journey);
+          }
+          if (n8nLead.id) {
+            journeyByLeadId.set(n8nLead.id, n8nLead.journey);
+          }
+        }
+      });
+
+      console.log(`[FB Leads] Found ${journeyByPhone.size} journey records by phone, ${journeyByLeadId.size} by lead ID`);
+
+      // Enrich each lead with journey data
+      return leads.map(lead => {
+        // Try to find journey by lead ID first, then by phone
+        let journey = journeyByLeadId.get(lead.id);
+
+        if (!journey && lead.phone) {
+          const normalizedPhone = this.normalizePhone(lead.phone);
+          journey = journeyByPhone.get(normalizedPhone);
+        }
+
+        if (journey) {
+          // Update status based on journey
+          let status = lead.status;
+          if (journey.isBooked) {
+            status = 'booked';
+          } else if (journey.callOutcome === 'not_interested' || journey.callOutcome === 'wrong_number') {
+            status = 'not_interested';
+          } else if (journey.contactedAt || journey.callOutcome) {
+            status = 'contacted';
+          } else if (journey.isMember) {
+            status = 'qualified';
+          }
+
+          return { ...lead, journey, status };
+        }
+
+        return lead;
+      });
+    } catch (error) {
+      console.error('[FB Leads] Error enriching with n8n journey data:', error);
+      return leads;
+    }
+  }
+
+  /**
+   * Get leads from n8n workflow executions (internal method for journey enrichment)
+   */
+  private async getLeadsFromN8N(startDate: Date, endDate: Date): Promise<FacebookLead[]> {
+    try {
+      const facebookWorkflowId = '9gbmNOvmObqSIe8u';
+
+      console.log(`[FB Leads] Fetching n8n executions for journey data (workflow: ${facebookWorkflowId})`);
+
+      const data = await this.fetchN8N(`/executions?workflowId=${facebookWorkflowId}&limit=250`);
+
+      if (!data.data || !Array.isArray(data.data)) {
+        return [];
+      }
+
+      // Fetch full execution data
+      const fullExecutions = await Promise.all(
+        data.data.map(async (exec: any) => {
+          try {
+            return await this.fetchN8N(`/executions/${exec.id}?includeData=true`);
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      // Extract leads with journey data
+      const leads: FacebookLead[] = [];
+      fullExecutions.forEach((execution: any) => {
+        if (!execution) return;
+        const lead = this.extractLeadFromExecution(execution);
+        if (lead) {
+          const leadDate = new Date(lead.createdTime);
+          if (leadDate >= startDate && leadDate <= endDate) {
+            leads.push(lead);
+          }
+        }
+      });
+
+      return leads;
+    } catch (error) {
+      console.error('[FB Leads] Error fetching n8n journey data:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Normalize phone number for comparison
+   */
+  private normalizePhone(phone?: string): string {
+    if (!phone) return '';
+
+    // Remove all non-digit characters
+    let digits = String(phone).replace(/\D/g, '');
+
+    // Remove Australian country code
+    if (digits.startsWith('61') && digits.length === 11) {
+      digits = '0' + digits.slice(2);
+    }
+    if (digits.startsWith('+61')) {
+      digits = '0' + digits.slice(3);
+    }
+
+    return digits;
   }
 }
 
