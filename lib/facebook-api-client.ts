@@ -44,10 +44,44 @@ interface FacebookLeadsResponse {
 export class FacebookAPIClient {
   private accessToken: string;
   private pageId: string;
+  private pageAccessToken: string | null = null;
 
   constructor() {
     this.accessToken = FB_ACCESS_TOKEN;
     this.pageId = FB_PAGE_ID;
+  }
+
+  /**
+   * Get the page-specific access token (required for leadgen forms)
+   * The user token can fetch /me/accounts which returns page tokens
+   */
+  private async getPageAccessToken(): Promise<string> {
+    if (this.pageAccessToken) {
+      return this.pageAccessToken;
+    }
+
+    try {
+      const url = `${FB_GRAPH_API_BASE}/me/accounts?access_token=${this.accessToken}`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.data && data.data.length > 0) {
+        // Find the page matching our Page ID
+        const page = data.data.find((p: any) => p.id === this.pageId);
+        if (page && page.access_token) {
+          this.pageAccessToken = page.access_token;
+          console.log('[FB API] Got page-specific access token');
+          return this.pageAccessToken as string;
+        }
+      }
+
+      // Fallback to main token if page token not found
+      console.log('[FB API] Page token not found, using main token');
+      return this.accessToken;
+    } catch (error) {
+      console.error('[FB API] Error getting page token:', error);
+      return this.accessToken;
+    }
   }
 
   /**
@@ -89,6 +123,7 @@ export class FacebookAPIClient {
 
   /**
    * Get all leadgen forms for the page
+   * Uses page-specific access token for proper permissions
    */
   async getLeadgenForms(): Promise<FacebookLeadgenForm[]> {
     if (!this.isConfigured()) {
@@ -97,13 +132,24 @@ export class FacebookAPIClient {
     }
 
     try {
-      const response = await this.fetchFacebookAPI<{ data: FacebookLeadgenForm[] }>(
-        `/${this.pageId}/leadgen_forms`,
-        { fields: 'id,name,leads_count,status' }
-      );
+      // Get the page-specific token (required for leadgen forms)
+      const pageToken = await this.getPageAccessToken();
 
-      console.log(`[FB API] Found ${response.data?.length || 0} leadgen forms`);
-      return response.data || [];
+      const url = `${FB_GRAPH_API_BASE}/${this.pageId}/leadgen_forms?fields=id,name,leads_count,status&access_token=${pageToken}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Facebook API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log(`[FB API] Found ${data.data?.length || 0} leadgen forms`);
+      return data.data || [];
     } catch (error) {
       console.error('[FB API] Error fetching leadgen forms:', error);
       return [];
@@ -112,18 +158,27 @@ export class FacebookAPIClient {
 
   /**
    * Get leads from a specific form
+   * Uses page-specific access token for proper permissions
    */
   async getLeadsFromForm(formId: string, limit: number = 100): Promise<FacebookLeadData[]> {
     try {
-      const response = await this.fetchFacebookAPI<FacebookLeadsResponse>(
-        `/${formId}/leads`,
-        {
-          fields: 'id,created_time,field_data,ad_id,ad_name',
-          limit: String(limit),
-        }
-      );
+      // Get the page-specific token
+      const pageToken = await this.getPageAccessToken();
 
-      return response.data || [];
+      const url = `${FB_GRAPH_API_BASE}/${formId}/leads?fields=id,created_time,field_data,ad_id,ad_name&limit=${limit}&access_token=${pageToken}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Facebook API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.data || [];
     } catch (error) {
       console.error(`[FB API] Error fetching leads from form ${formId}:`, error);
       return [];
