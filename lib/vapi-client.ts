@@ -235,8 +235,9 @@ export class VAPIClient {
   }
 
   /**
-   * Get the count of calls for today (AWST)
+   * Get the count of calls for today (AWST: 12:00 AM to 11:59 PM)
    * Used for detecting new scheduled/completed calls
+   * Resets at midnight AWST each day
    */
   async getTodaysCallCount(): Promise<{ count: number; latestCallId: string | null; latestCallTime: string | null }> {
     // Get current date in AWST
@@ -250,10 +251,11 @@ export class VAPIClient {
     const awstDateStr = awstFormatter.format(now);
     const [year, month, day] = awstDateStr.split('-').map(Number);
 
-    // AWST midnight in UTC
-    const startOfDay = new Date(Date.UTC(year, month - 1, day - 1, 16, 0, 0, 0));
+    // AWST midnight (00:00) in UTC = 16:00 UTC previous day
+    // For AWST date 2024-01-22, midnight is 2024-01-21 16:00 UTC
+    const startOfDayAWSTinUTC = new Date(Date.UTC(year, month - 1, day - 1, 16, 0, 0, 0));
 
-    const calls = await this.getCalls(startOfDay, now);
+    const calls = await this.getCalls(startOfDayAWSTinUTC, now);
 
     return {
       count: calls.length,

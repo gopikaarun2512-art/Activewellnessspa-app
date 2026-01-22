@@ -134,6 +134,11 @@ function DashboardContent() {
         // Update the tracked date
         currentAWSTDateRef.current = newAWSTDate;
 
+        // Reset VAPI call tracking for new day (12:00 AM AWST reset)
+        vapiCallCountRef.current = 0;
+        vapiLatestCallIdRef.current = null;
+        console.log('[Dashboard] VAPI call tracking reset for new day');
+
         // Force full refresh with cache bust
         fetchData(true, 'today', true);
 
@@ -158,6 +163,11 @@ function DashboardContent() {
       if (currentDate !== currentAWSTDateRef.current) {
         console.log(`[Dashboard] Date changed from ${currentAWSTDateRef.current} to ${currentDate}`);
         currentAWSTDateRef.current = currentDate;
+
+        // Reset VAPI call tracking for new day (12:00 AM AWST reset)
+        vapiCallCountRef.current = 0;
+        vapiLatestCallIdRef.current = null;
+        console.log('[Dashboard] VAPI call tracking reset for new day (backup check)');
 
         // Force full refresh for new day
         fetchData(true, 'today', true);
