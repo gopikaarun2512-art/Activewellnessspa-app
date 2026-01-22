@@ -217,6 +217,15 @@ export class AnalyticsAggregator {
       new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     );
 
+    // Enrich Facebook leads with journey data from VAPI calls and queue
+    const enrichedFacebookLeads = this.enrichFacebookLeadsWithJourney(
+      facebookLeads,
+      vapiCalls,
+      separatedCallData.queuedCalls,
+      separatedCallData.scheduledCallbacks,
+      separatedCallData.completedCalls
+    );
+
     return {
       metrics,
       callVolume,
@@ -226,9 +235,206 @@ export class AnalyticsAggregator {
       scheduledCallbacks,
       completedCalls,
       vapiCalls: sortedVapiCalls,
-      facebookLeads,
+      facebookLeads: enrichedFacebookLeads,
       lastUpdated: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Enrich Facebook leads with journey data from VAPI calls and queue
+   * Correlates leads by phone number to build complete journey timeline
+   */
+  private enrichFacebookLeadsWithJourney(
+    leads: FacebookLead[],
+    vapiCalls: VAPICall[],
+    queuedCalls: QueuedCall[],
+    scheduledCallbacks: ScheduledCallback[],
+    completedCalls: CompletedCall[]
+  ): FacebookLead[] {
+    // Create phone-to-data maps for quick lookup
+    const vapiCallsByPhone = new Map<string, VAPICall[]>();
+    const queuedByPhone = new Map<string, QueuedCall>();
+    const callbacksByPhone = new Map<string, ScheduledCallback>();
+    const completedByPhone = new Map<string, CompletedCall>();
+
+    // Index VAPI calls by phone
+    vapiCalls.forEach(call => {
+      const phone = this.normalizePhone(call.phoneNumber);
+      if (phone) {
+        const existing = vapiCallsByPhone.get(phone) || [];
+        existing.push(call);
+        vapiCallsByPhone.set(phone, existing);
+      }
+    });
+
+    // Index queue data by phone
+    queuedCalls.forEach(call => {
+      const phone = this.normalizePhone(call.phone);
+      if (phone) queuedByPhone.set(phone, call);
+    });
+
+    scheduledCallbacks.forEach(callback => {
+      const phone = this.normalizePhone(callback.phone);
+      if (phone) callbacksByPhone.set(phone, callback);
+    });
+
+    completedCalls.forEach(call => {
+      const phone = this.normalizePhone(call.phone);
+      if (phone) completedByPhone.set(phone, call);
+    });
+
+    // Enrich each lead
+    return leads.map(lead => {
+      const phone = this.normalizePhone(lead.phone);
+      if (!phone) return lead;
+
+      // Get matching data
+      const matchingVapiCalls = vapiCallsByPhone.get(phone) || [];
+      const queuedCall = queuedByPhone.get(phone);
+      const scheduledCallback = callbacksByPhone.get(phone);
+      const completedCall = completedByPhone.get(phone);
+
+      // Start with existing journey or create new one
+      const journey: NonNullable<FacebookLead['journey']> = lead.journey ? { ...lead.journey } : {};
+
+      // Track if lead was originally queued (for showing queued -> called transition)
+      const wasQueued = queuedCall !== undefined || journey.queuedAt !== undefined;
+
+      // If there's a queued call record, capture the queue time
+      if (queuedCall && !journey.queuedAt) {
+        journey.queuedAt = queuedCall.queuedAt;
+      }
+
+      // Check if the lead has been called (completed call or VAPI calls exist)
+      const hasBeenCalled = completedCall !== undefined || matchingVapiCalls.length > 0;
+
+      // Determine contact method based on queue status and call status
+      if (hasBeenCalled) {
+        // Lead has been called - update contact method
+        if (wasQueued) {
+          // Was queued, now called - show as "queued" but with contacted data
+          journey.contactMethod = 'queued';
+        } else {
+          // Direct/instant call
+          journey.contactMethod = 'instant';
+        }
+
+        // Get contact time from completed call or VAPI
+        if (completedCall) {
+          journey.contactedAt = completedCall.calledAt;
+          journey.callOutcome = journey.callOutcome || completedCall.callOutcome;
+          journey.vapiCallId = journey.vapiCallId || completedCall.vapiCallId;
+        }
+      } else if (wasQueued && !journey.contactMethod) {
+        // Still in queue, not yet called
+        journey.contactMethod = 'queued';
+      }
+
+      // Check for callback
+      if (scheduledCallback) {
+        journey.callbackRequested = true;
+        journey.callbackScheduledAt = scheduledCallback.scheduledAt;
+        journey.callbackReason = scheduledCallback.callbackReason;
+      }
+
+      // Enrich with VAPI call data (most recent first)
+      if (matchingVapiCalls.length > 0) {
+        // Sort by time, most recent first
+        const sortedCalls = [...matchingVapiCalls].sort(
+          (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+        );
+
+        const latestCall = sortedCalls[0];
+
+        // Set contact time if not already set
+        if (!journey.contactedAt) {
+          journey.contactedAt = latestCall.startedAt;
+        }
+
+        // Get call outcome if not already set
+        if (!journey.callOutcome && latestCall.outcome) {
+          journey.callOutcome = latestCall.outcome;
+        }
+
+        // Get call summary if not already set
+        if (!journey.callSummary && latestCall.summary) {
+          journey.callSummary = latestCall.summary;
+        }
+
+        // Get call duration
+        if (!journey.callDuration && latestCall.duration) {
+          journey.callDuration = latestCall.duration;
+        }
+
+        // Set VAPI call ID
+        if (!journey.vapiCallId) {
+          journey.vapiCallId = latestCall.id;
+        }
+
+        // Track total attempts
+        journey.totalAttempts = sortedCalls.length;
+        journey.lastAttemptAt = latestCall.startedAt;
+
+        // Check if callback was requested based on outcome
+        if (latestCall.outcome?.toLowerCase().includes('callback')) {
+          journey.callbackRequested = true;
+        }
+      }
+
+      // Update lead status based on enriched journey
+      // Priority: booked > not_interested > contacted > qualified > new
+      let newStatus = lead.status;
+      if (journey.isBooked) {
+        newStatus = 'booked';
+      } else if (journey.callOutcome) {
+        if (journey.callOutcome === 'not_interested' || journey.callOutcome === 'wrong_number') {
+          newStatus = 'not_interested';
+        } else {
+          newStatus = 'contacted';
+        }
+      } else if (journey.contactedAt) {
+        // Has been contacted (has a contact time)
+        newStatus = 'contacted';
+      } else if (journey.isMember) {
+        newStatus = 'qualified';
+      } else if (journey.contactMethod === 'queued' && !journey.contactedAt) {
+        // Still queued, not yet contacted - keep as 'new' since not actually contacted yet
+        newStatus = 'new';
+      }
+
+      // Return enriched lead
+      return {
+        ...lead,
+        status: newStatus,
+        journey: Object.keys(journey).length > 0 ? journey : undefined,
+      };
+    });
+  }
+
+  /**
+   * Normalize phone number for comparison
+   * Removes country code prefixes and non-digit characters
+   */
+  private normalizePhone(phone?: string): string {
+    if (!phone) return '';
+
+    // Handle object phone numbers from VAPI
+    if (typeof phone === 'object' && (phone as any).number) {
+      phone = (phone as any).number;
+    }
+
+    // Remove all non-digit characters
+    let digits = String(phone).replace(/\D/g, '');
+
+    // Remove common country codes for Australia
+    if (digits.startsWith('61') && digits.length === 11) {
+      digits = '0' + digits.slice(2);
+    }
+    if (digits.startsWith('+61')) {
+      digits = '0' + digits.slice(3);
+    }
+
+    return digits;
   }
 
   /**

@@ -146,4 +146,34 @@ export interface FacebookLead {
   status: 'new' | 'contacted' | 'qualified' | 'booked' | 'not_interested';
   source: 'facebook_ad' | 'facebook_page';
   customFields?: Record<string, string>;
+
+  // Journey tracking fields
+  journey?: {
+    // Contact method: instant call or queued
+    contactMethod?: 'instant' | 'queued';
+    contactedAt?: string;           // When the lead was first contacted
+    queuedAt?: string;              // When the lead was added to queue (if queued)
+
+    // Callback tracking
+    callbackRequested?: boolean;
+    callbackScheduledAt?: string;   // When the callback is scheduled
+    callbackReason?: string;        // Why callback was requested
+    callbackCompleted?: boolean;    // Whether callback was completed
+
+    // Call outcome
+    callOutcome?: 'booking_link_sent' | 'no_answer' | 'voicemail' | 'not_interested' | 'callback_requested' | 'busy' | 'wrong_number' | 'completed' | string;
+    callSummary?: string;           // AI-generated call summary
+    callDuration?: number;          // Duration in seconds
+    vapiCallId?: string;            // VAPI call ID for reference
+
+    // Final booking status (from GymMaster)
+    gymMasterChecked?: boolean;     // Whether GymMaster was checked
+    isBooked?: boolean;             // Final booking status from GymMaster
+    isMember?: boolean;             // Whether they're already a member
+    memberId?: string;              // GymMaster member ID if exists
+
+    // Attempt tracking
+    totalAttempts?: number;         // Total call attempts
+    lastAttemptAt?: string;         // Time of last attempt
+  };
 }

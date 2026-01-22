@@ -117,6 +117,7 @@ export class FacebookLeadsClient {
   /**
    * Extract Facebook lead data from n8n execution
    * Priority: Look for "Normalize Lead Data" node first as it has the complete lead info
+   * Also extracts journey tracking data (contact method, call outcome, GymMaster status)
    */
   private extractLeadFromExecution(execution: any): FacebookLead | null {
     try {
@@ -124,6 +125,7 @@ export class FacebookLeadsClient {
       if (!runData) return null;
 
       let leadData: any = {};
+      let journeyData: any = {};
 
       // Priority 1: Look for "Normalize Lead Data (Phone + Attribution)" node
       // This node has the complete, normalized lead data
@@ -158,6 +160,12 @@ export class FacebookLeadsClient {
           leadData.isMember = json.is_member;
           leadData.isBooked = json.is_booked;
           leadData.memberId = json.member_id;
+
+          // Add to journey data
+          journeyData.gymMasterChecked = true;
+          journeyData.isBooked = json.is_booked === true;
+          journeyData.isMember = json.is_member === true;
+          journeyData.memberId = json.member_id;
         }
       }
 
@@ -169,6 +177,98 @@ export class FacebookLeadsClient {
           const json = nodeRuns[0].data.main[0][0].json;
           if (json.field_data) {
             leadData.customFields = json.field_data;
+          }
+        }
+      }
+
+      // Priority 4: Check VAPI Status Handler for call outcomes and summary
+      const vapiStatusNodeNames = [
+        'VAPI Status Handler',
+        'Process VAPI Status',
+        'Handle Call Status',
+        'Call Status Handler',
+      ];
+      for (const nodeName of vapiStatusNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            if (json.call_outcome) journeyData.callOutcome = json.call_outcome;
+            if (json.call_summary || json.summary) journeyData.callSummary = json.call_summary || json.summary;
+            if (json.booking_requested !== undefined) journeyData.bookingRequested = json.booking_requested;
+            if (json.interest_level) journeyData.interestLevel = json.interest_level;
+            if (json.vapi_call_id) journeyData.vapiCallId = json.vapi_call_id;
+            if (json.call_duration) journeyData.callDuration = json.call_duration;
+          }
+        }
+      }
+
+      // Priority 5: Check for queue-related data (instant vs queued)
+      const queueNodeNames = [
+        'Add to Queue',
+        'Queue Handler',
+        'Process Queue',
+        'Check Queue Status',
+      ];
+      for (const nodeName of queueNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            journeyData.contactMethod = 'queued';
+            if (json.queued_at || json.queuedAt) journeyData.queuedAt = json.queued_at || json.queuedAt;
+            if (json.status) journeyData.queueStatus = json.status;
+          }
+        }
+      }
+
+      // Priority 6: Check for callback data
+      const callbackNodeNames = [
+        'Schedule Callback',
+        'Callback Handler',
+        'Process Callback',
+      ];
+      for (const nodeName of callbackNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            journeyData.callbackRequested = true;
+            if (json.scheduled_at || json.scheduledAt) journeyData.callbackScheduledAt = json.scheduled_at || json.scheduledAt;
+            if (json.callback_reason || json.reason) journeyData.callbackReason = json.callback_reason || json.reason;
+          }
+        }
+      }
+
+      // Priority 7: Check VAPI Webhook nodes for call data
+      const vapiWebhookNodeNames = [
+        'Webhook',
+        'VAPI Webhook',
+        'Call Webhook',
+      ];
+      for (const nodeName of vapiWebhookNodeNames) {
+        if (runData[nodeName]) {
+          const json = this.getNodeJson(runData[nodeName]);
+          if (json) {
+            // Extract VAPI call data
+            if (!journeyData.callSummary) {
+              if (json.summary) journeyData.callSummary = json.summary;
+              if (json.message?.summary) journeyData.callSummary = json.message.summary;
+              if (json.message?.analysis?.summary) journeyData.callSummary = json.message.analysis.summary;
+            }
+            if (!journeyData.callOutcome && json.message?.analysis?.structuredData?.outcome) {
+              journeyData.callOutcome = json.message.analysis.structuredData.outcome;
+            }
+            if (!journeyData.vapiCallId && (json.call?.id || json.message?.call?.id)) {
+              journeyData.vapiCallId = json.call?.id || json.message?.call?.id;
+            }
+            if (!journeyData.callDuration && (json.call?.duration || json.message?.call?.duration)) {
+              journeyData.callDuration = json.call?.duration || json.message?.call?.duration;
+            }
+            // Check if this was an instant call (has VAPI call data without queue)
+            if (json.call || json.message?.call) {
+              if (!journeyData.contactMethod) {
+                journeyData.contactMethod = 'instant';
+              }
+              journeyData.contactedAt = json.call?.startedAt || json.message?.call?.startedAt || execution.startedAt;
+            }
           }
         }
       }
@@ -204,6 +304,20 @@ export class FacebookLeadsClient {
                     if (!leadData.adName && json.ad_name) leadData.adName = json.ad_name;
                     if (!leadData.source && json.ad_source) leadData.source = json.ad_source;
                     if (!leadData.customFields && json.field_data) leadData.customFields = json.field_data;
+
+                    // Also extract journey data from fallback scan
+                    if (!journeyData.callOutcome && (json.call_outcome || json.outcome)) {
+                      journeyData.callOutcome = json.call_outcome || json.outcome;
+                    }
+                    if (!journeyData.callSummary && (json.call_summary || json.summary)) {
+                      journeyData.callSummary = json.call_summary || json.summary;
+                    }
+                    if (json.callback_requested === true) {
+                      journeyData.callbackRequested = true;
+                    }
+                    if (!journeyData.totalAttempts && json.attempts) {
+                      journeyData.totalAttempts = json.attempts;
+                    }
                   }
                 });
               }
@@ -217,13 +331,42 @@ export class FacebookLeadsClient {
         return null;
       }
 
-      // Determine status based on GymMaster check
+      // Determine status based on journey and GymMaster check
       let status: FacebookLead['status'] = 'new';
-      if (leadData.isBooked === true) {
+      if (journeyData.isBooked === true || leadData.isBooked === true) {
         status = 'booked';
-      } else if (leadData.isMember === true) {
+      } else if (journeyData.callOutcome) {
+        // Has been contacted
+        status = 'contacted';
+        if (journeyData.callOutcome === 'not_interested' || journeyData.callOutcome === 'wrong_number') {
+          status = 'not_interested';
+        }
+      } else if (journeyData.isMember === true || leadData.isMember === true) {
         status = 'qualified'; // Member but not booked
+      } else if (journeyData.contactMethod) {
+        status = 'contacted';
       }
+
+      // Build journey object only if we have journey data
+      const journey = Object.keys(journeyData).length > 0 ? {
+        contactMethod: journeyData.contactMethod,
+        contactedAt: journeyData.contactedAt,
+        queuedAt: journeyData.queuedAt,
+        callbackRequested: journeyData.callbackRequested,
+        callbackScheduledAt: journeyData.callbackScheduledAt,
+        callbackReason: journeyData.callbackReason,
+        callbackCompleted: journeyData.callbackCompleted,
+        callOutcome: journeyData.callOutcome,
+        callSummary: journeyData.callSummary,
+        callDuration: journeyData.callDuration,
+        vapiCallId: journeyData.vapiCallId,
+        gymMasterChecked: journeyData.gymMasterChecked,
+        isBooked: journeyData.isBooked,
+        isMember: journeyData.isMember,
+        memberId: journeyData.memberId,
+        totalAttempts: journeyData.totalAttempts,
+        lastAttemptAt: journeyData.contactedAt,
+      } : undefined;
 
       // Build Facebook lead object
       const lead: FacebookLead = {
@@ -239,6 +382,7 @@ export class FacebookLeadsClient {
         status,
         source: this.normalizeSource(leadData.source),
         customFields: leadData.customFields,
+        journey,
       };
 
       return lead;
@@ -246,6 +390,16 @@ export class FacebookLeadsClient {
       console.error('Error extracting lead from execution:', error);
       return null;
     }
+  }
+
+  /**
+   * Helper to extract JSON from a node's run data
+   */
+  private getNodeJson(nodeRuns: any): any | null {
+    if (Array.isArray(nodeRuns) && nodeRuns[0]?.data?.main?.[0]?.[0]?.json) {
+      return nodeRuns[0].data.main[0][0].json;
+    }
+    return null;
   }
 
   /**
