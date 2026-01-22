@@ -545,9 +545,19 @@ export class AnalyticsAggregator {
       outbound: 0,
     }));
 
-    // Aggregate calls by hour
+    // Aggregate calls by hour (in AWST timezone)
     vapiCalls.forEach(call => {
-      const hour = new Date(call.startedAt).getHours();
+      // Convert call time to AWST for correct hour bucketing
+      const callDate = new Date(call.startedAt);
+      // Use Intl.DateTimeFormat to get the hour in AWST
+      const awstHourFormatter = new Intl.DateTimeFormat('en-AU', {
+        timeZone: 'Australia/Perth',
+        hour: 'numeric',
+        hour12: false,
+      });
+      const hourStr = awstHourFormatter.format(callDate);
+      const hour = parseInt(hourStr, 10);
+
       if (call.type === 'inbound') {
         hourlyData[hour].inbound++;
       } else {
@@ -565,42 +575,67 @@ export class AnalyticsAggregator {
     // - noAnswer = no_answer, busy
     // - voicemail = voicemail
     // - notInterested = not_interested, wrong_number
-    // - other = callback_requested, unknown
+    // - other = callback_requested, unknown, completed (successful conversation but no booking)
     const outcomeCounts = {
       booked: 0,        // FB leads that confirmed booking (is_booked === true)
       linkSent: 0,      // booking_link_sent - lead interested, link sent (not confirmed)
       noAnswer: 0,      // no_answer, busy
       voicemail: 0,     // voicemail
       notInterested: 0, // not_interested, wrong_number
-      other: 0,         // callback_requested, unknown
+      other: 0,         // callback_requested, completed, unknown
     };
+
+    // Create a set of phones with confirmed bookings from n8n
+    const bookedPhones = new Set<string>();
+    n8nExecutions.forEach(exec => {
+      if (exec.data.isBooked === true || exec.data.booked === true) {
+        const phone = this.normalizePhone(exec.data.phone);
+        if (phone) bookedPhones.add(phone);
+      }
+    });
 
     // Count FB lead bookings from n8n executions (is_booked flag)
     // This only counts leads processed by our workflow, not all GymMaster bookings
-    outcomeCounts.booked = n8nExecutions.filter(exec =>
-      exec.data.isBooked === true || exec.data.booked === true
-    ).length;
+    outcomeCounts.booked = bookedPhones.size;
 
     // Count call outcomes from VAPI calls
+    // Track processed phones to avoid double-counting
+    const processedPhones = new Set<string>();
+
     vapiCalls.forEach(call => {
+      const phone = this.normalizePhone(call.phoneNumber);
       const outcome = (call.outcome || call.status || '').toLowerCase();
 
+      // Skip if this phone was already confirmed booked (counted above)
+      if (phone && bookedPhones.has(phone)) {
+        return;
+      }
+
+      // Skip if we've already processed a call from this phone
+      // (We only want to count each lead once based on their most recent call outcome)
+      if (phone && processedPhones.has(phone)) {
+        return;
+      }
+      if (phone) processedPhones.add(phone);
+
       // "booking_link_sent" = link sent, NOT confirmed booking
-      if (outcome === 'booking_link_sent' || outcome.includes('booking_link')) {
+      if (outcome === 'booking_link_sent' || outcome.includes('booking_link') || outcome.includes('link_sent')) {
         outcomeCounts.linkSent++;
-      } else if (outcome === 'no_answer' || outcome === 'no-answer' || outcome === 'busy' || outcome.includes('no answer')) {
+      } else if (outcome === 'no_answer' || outcome === 'no-answer' || outcome === 'busy' || outcome.includes('no answer') || outcome === 'customer-did-not-answer') {
         outcomeCounts.noAnswer++;
-      } else if (outcome === 'voicemail') {
+      } else if (outcome === 'voicemail' || outcome.includes('voicemail')) {
         outcomeCounts.voicemail++;
-      } else if (outcome === 'not_interested' || outcome === 'wrong_number' || outcome.includes('not interested') || outcome.includes('wrong')) {
+      } else if (outcome === 'not_interested' || outcome === 'wrong_number' || outcome.includes('not interested') || outcome.includes('wrong') || outcome === 'not-interested') {
         outcomeCounts.notInterested++;
       } else {
-        // callback_requested and other outcomes go here
+        // callback_requested, completed (successful call, no specific outcome), and other outcomes
         outcomeCounts.other++;
       }
     });
 
-    const total = vapiCalls.length || 1;
+    // Calculate total for percentage (all outcome categories combined)
+    const total = outcomeCounts.booked + outcomeCounts.linkSent + outcomeCounts.noAnswer +
+                  outcomeCounts.voicemail + outcomeCounts.notInterested + outcomeCounts.other || 1;
 
     return [
       {
