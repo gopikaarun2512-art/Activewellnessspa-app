@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import MetricsGrid from '@/components/dashboard/MetricsGrid';
 import CallVolumeChart from '@/components/dashboard/CallVolumeChart';
@@ -20,6 +20,47 @@ import type { DashboardData } from '@/types/analytics';
 import type { GamificationData } from '@/types/gamification';
 import { format } from 'date-fns';
 
+/**
+ * Get the current date in AWST (Australia/Perth) as YYYY-MM-DD string
+ */
+function getCurrentAWSTDate(): string {
+  const awstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Perth',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return awstFormatter.format(new Date());
+}
+
+/**
+ * Calculate milliseconds until midnight AWST
+ */
+function getMsUntilMidnightAWST(): number {
+  const now = new Date();
+
+  // Get current date in AWST
+  const awstFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Perth',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const awstDateStr = awstFormatter.format(now);
+  const [year, month, day] = awstDateStr.split('-').map(Number);
+
+  // Next midnight AWST = next day 00:00 AWST = current day 16:00 UTC
+  // (AWST is UTC+8, so midnight AWST = 16:00 UTC previous day)
+  const nextMidnightAWSTinUTC = new Date(Date.UTC(year, month - 1, day, 16, 0, 0, 0));
+
+  // If we're already past today's midnight AWST boundary, target tomorrow
+  if (now.getTime() >= nextMidnightAWSTinUTC.getTime()) {
+    nextMidnightAWSTinUTC.setUTCDate(nextMidnightAWSTinUTC.getUTCDate() + 1);
+  }
+
+  return nextMidnightAWSTinUTC.getTime() - now.getTime();
+}
+
 function DashboardContent() {
   const [data, setData] = useState<{
     dashboard: DashboardData | null;
@@ -32,6 +73,9 @@ function DashboardContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange>('today');
   const { showToast } = useToast();
+
+  // Track current AWST date to detect midnight rollover
+  const currentAWSTDateRef = useRef<string>(getCurrentAWSTDate());
 
   const fetchData = useCallback(async (isRefresh = false, dateRange?: DateRange, forceRefresh = false) => {
     try {
@@ -70,6 +114,57 @@ function DashboardContent() {
     const interval = setInterval(() => fetchData(true), 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Midnight AWST auto-refresh: Full data refresh at 12:00 AM AWST every day
+  useEffect(() => {
+    // Function to schedule refresh at next midnight AWST
+    const scheduleMidnightRefresh = () => {
+      const msUntilMidnight = getMsUntilMidnightAWST();
+
+      console.log(`[Dashboard] Scheduling midnight AWST refresh in ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
+
+      const timeoutId = setTimeout(() => {
+        const newAWSTDate = getCurrentAWSTDate();
+        console.log(`[Dashboard] Midnight AWST reached! Refreshing data for new day: ${newAWSTDate}`);
+
+        // Update the tracked date
+        currentAWSTDateRef.current = newAWSTDate;
+
+        // Force full refresh with cache bust
+        fetchData(true, 'today', true);
+
+        // Show notification to user
+        showToast('New day started - Dashboard refreshed for ' + newAWSTDate, 'success');
+
+        // Schedule next midnight refresh
+        scheduleMidnightRefresh();
+      }, msUntilMidnight);
+
+      return timeoutId;
+    };
+
+    const timeoutId = scheduleMidnightRefresh();
+    return () => clearTimeout(timeoutId);
+  }, [fetchData, showToast]);
+
+  // Also check for date change on each regular refresh (backup mechanism)
+  useEffect(() => {
+    const checkDateChange = () => {
+      const currentDate = getCurrentAWSTDate();
+      if (currentDate !== currentAWSTDateRef.current) {
+        console.log(`[Dashboard] Date changed from ${currentAWSTDateRef.current} to ${currentDate}`);
+        currentAWSTDateRef.current = currentDate;
+
+        // Force full refresh for new day
+        fetchData(true, 'today', true);
+        showToast('New day started - Dashboard refreshed', 'success');
+      }
+    };
+
+    // Check every minute as a backup
+    const interval = setInterval(checkDateChange, 60000);
+    return () => clearInterval(interval);
+  }, [fetchData, showToast]);
 
   // Handle manual refresh
   const handleRefresh = useCallback(() => {
