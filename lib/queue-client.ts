@@ -80,13 +80,20 @@ export class QueueClient {
 
       const data = await response.json();
 
-      // Debug: Log raw webhook response
+      // Debug: Log raw webhook response including scheduled time fields
       console.log('[Queue Client] Raw webhook response:', {
         itemCount: Array.isArray(data) ? data.length : (data.data?.length || 0),
-        sampleStatuses: (Array.isArray(data) ? data : data.data || []).slice(0, 3).map((item: any) => ({
-          name: item.leadName,
+        sampleData: (Array.isArray(data) ? data : data.data || []).slice(0, 3).map((item: any) => ({
+          name: item.leadName || item.firstName,
           status: item.status,
-          callOutcome: item.callOutcome,
+          callOutcome: item.callOutcome || item.call_outcome,
+          priority: item.priority,
+          scheduledFields: {
+            estimatedCallTime: item.estimatedCallTime,
+            scheduled_call_time: item.scheduled_call_time,
+            execution_time: item.execution_time,
+            earliest_call_at: item.earliest_call_at,
+          },
         })),
       });
 
@@ -95,23 +102,25 @@ export class QueueClient {
 
       // The webhook already returns transformed data, just ensure types are correct
       return items.map((item: any) => ({
-        id: item.id || '',
-        phone: String(item.phone || ''),
-        leadName: item.leadName || 'Unknown',
-        type: item.type === 'inbound' ? 'inbound' : 'outbound',
-        queuedAt: item.queuedAt || new Date().toISOString(),
-        estimatedCallTime: item.estimatedCallTime || undefined,
+        id: item.id || item.queue_id || '',
+        phone: String(item.phone || item.phone_e164 || ''),
+        leadName: item.leadName || [item.firstName, item.lastName].filter(Boolean).join(' ') || 'Unknown',
+        type: item.type === 'inbound' || item['inbound/outbound'] === 'inbound' ? 'inbound' : 'outbound',
+        queuedAt: item.queuedAt || item.created_at || new Date().toISOString(),
+        // Map scheduled time from multiple possible field names
+        estimatedCallTime: item.estimatedCallTime || item.scheduled_call_time || item.execution_time || item.earliest_call_at || undefined,
         priority: item.priority || 'medium',
-        workflowName: item.workflowName || undefined,
+        workflowName: item.workflowName || item.source || undefined,
         // Extended fields
         status: item.status,
         email: item.email,
-        contactId: item.contactId,
-        opportunityId: item.opportunityId,
+        contactId: item.contactId || item.contact_id,
+        opportunityId: item.opportunityId || item.opportunity_id,
         attempts: item.attempts,
-        vapiCallId: item.vapiCallId,
-        callOutcome: item.callOutcome,
-        batchPosition: item.batchPosition,
+        vapiCallId: item.vapiCallId || item.vapi_call_id,
+        callOutcome: item.callOutcome || item.call_outcome,
+        batchPosition: item.batchPosition || item.batch_position,
+        callbackReason: item.callbackReason || item.callback_reason,
       } as QueuedCall & Record<string, any>));
     } catch (error) {
       console.error('Error fetching queue from webhook:', error);
