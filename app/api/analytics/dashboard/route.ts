@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { analyticsAggregator } from '@/lib/analytics-aggregator';
+import { queueClient } from '@/lib/queue-client';
 import { gamificationCalculator } from '@/lib/gamification';
 import { getNowInAWST, formatInAWST } from '@/lib/timezone';
 
@@ -55,8 +56,9 @@ export async function GET(request: Request) {
       awstTime: formatInAWST(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       dailyResetTime: '12:00 PM AWST',
       nextResetHour: nowAWST.getHours() >= 12 ? 'Tomorrow 12:00 PM AWST' : 'Today 12:00 PM AWST',
-      apiVersion: '0.1.2-debug',
+      apiVersion: '0.1.3-trace',
       debug: {
+        webhookFetchStatus: queueClient.lastFetchStatus,
         queuedCallsCount: dashboardData.queuedCalls.length,
         firstQueuedCall: dashboardData.queuedCalls[0] ? {
           name: dashboardData.queuedCalls[0].leadName,

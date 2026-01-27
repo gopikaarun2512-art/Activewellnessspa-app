@@ -50,6 +50,7 @@ interface QueueSheetRow {
 export class QueueClient {
   private webhookUrl: string;
   private useGoogleSheetsFallback: boolean;
+  public lastFetchStatus: { status: number; ok: boolean; url: string; error?: string } | null = null;
 
   constructor() {
     this.webhookUrl = `${N8N_WEBHOOK_BASE}${QUEUE_WEBHOOK_PATH}`;
@@ -74,13 +75,19 @@ export class QueueClient {
         cache: 'no-store', // Disable fetch cache
       });
 
+      const fetchUrl = `${this.webhookUrl}${cacheBuster}`;
+      console.log('[Queue Client] Webhook response status:', response.status, response.ok);
+      this.lastFetchStatus = { status: response.status, ok: response.ok, url: fetchUrl };
+
       if (!response.ok) {
-        console.error('[Queue Client] Webhook returned non-OK status:', response.status, response.statusText);
+        const errorBody = await response.text();
+        console.error('[Queue Client] Webhook returned non-OK status:', response.status, 'body:', errorBody.substring(0, 200));
+        this.lastFetchStatus.error = errorBody.substring(0, 100);
         throw new Error(`Webhook error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('[Queue Client] Webhook returned OK, items:', Array.isArray(data) ? data.length : (data?.data?.length || 0));
+      console.log('[Queue Client] Webhook returned OK, items:', Array.isArray(data) ? data.length : (data?.data?.length || 0), 'sample:', JSON.stringify((Array.isArray(data) ? data : data?.data)?.[0] || {}).substring(0, 200));
 
       // Debug: Log raw webhook response including scheduled time fields
       console.log('[Queue Client] Raw webhook response:', {
