@@ -325,11 +325,15 @@ export class QueueClient {
           .join(' ')
           .trim() || 'Unknown';
 
-        // Determine priority
-        let priority: 'high' | 'medium' | 'low' = 'medium';
-        if (row.priority) {
-          priority = row.priority;
-        }
+        // Determine priority - normalize values like 'instant', 'urgent' to 'high'
+        const normalizePriority = (p: string | undefined): 'high' | 'medium' | 'low' => {
+          if (!p) return 'medium';
+          const lower = p.toLowerCase();
+          if (lower === 'high' || lower === 'instant' || lower === 'urgent') return 'high';
+          if (lower === 'low') return 'low';
+          return 'medium';
+        };
+        const priority = normalizePriority(row.priority);
 
         // Parse queued time
         const queuedAt = row.scheduled_call_time ||
