@@ -281,6 +281,88 @@ export class VAPIClient {
 
     return false;
   }
+
+  /**
+   * Get scheduled calls from VAPI
+   * These are calls that have been scheduled but not yet executed
+   * Status can be: 'scheduled', 'queued'
+   */
+  async getScheduledCalls(): Promise<Array<{
+    id: string;
+    phone: string;
+    leadName: string;
+    scheduledAt: string;
+    status: string;
+    assistantId?: string;
+  }>> {
+    try {
+      // Fetch recent and upcoming calls (scheduled calls may be in the future)
+      const now = new Date();
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 7); // Look 7 days ahead
+
+      const queryParams = new URLSearchParams();
+      queryParams.append('limit', '100');
+
+      const data = await this.fetch(`/call?${queryParams}`);
+
+      console.log('[VAPI Client] Raw calls data for scheduled check:', {
+        totalCalls: (data || []).length,
+        sampleStatuses: (data || []).slice(0, 5).map((c: any) => ({
+          id: c.id,
+          status: c.status,
+          scheduledAt: c.scheduledAt,
+          createdAt: c.createdAt,
+        })),
+      });
+
+      // Filter for scheduled/queued calls that haven't started yet
+      const scheduledCalls = (data || []).filter((call: any) => {
+        const status = (call.status || '').toLowerCase();
+        // VAPI scheduled calls have status 'scheduled' or 'queued'
+        return status === 'scheduled' || status === 'queued';
+      });
+
+      console.log(`[VAPI Client] Found ${scheduledCalls.length} scheduled calls`);
+
+      return scheduledCalls.map((call: any) => {
+        // Extract customer phone from various locations
+        const overrides = call.assistantOverrides?.variableValues || {};
+        let phone = '';
+        if (overrides.phone) {
+          phone = overrides.phone;
+        } else if (call.customer?.number) {
+          phone = call.customer.number;
+        } else if (call.customer?.phone) {
+          phone = call.customer.phone;
+        } else if (typeof call.phoneNumber === 'string') {
+          phone = call.phoneNumber;
+        } else if (call.phoneNumber?.number) {
+          phone = call.phoneNumber.number;
+        }
+
+        // Extract lead name
+        let leadName = '';
+        if (call.customer?.name) {
+          leadName = call.customer.name;
+        } else if (overrides.firstName || overrides.lastName) {
+          leadName = `${overrides.firstName || ''} ${overrides.lastName || ''}`.trim();
+        }
+
+        return {
+          id: call.id,
+          phone,
+          leadName: leadName || 'Scheduled Call',
+          scheduledAt: call.scheduledAt || call.createdAt,
+          status: call.status,
+          assistantId: call.assistantId,
+        };
+      });
+    } catch (error) {
+      console.error('[VAPI Client] Error fetching scheduled calls:', error);
+      return [];
+    }
+  }
 }
 
 export const vapiClient = new VAPIClient();

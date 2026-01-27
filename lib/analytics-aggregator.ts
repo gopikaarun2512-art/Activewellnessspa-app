@@ -217,9 +217,10 @@ export class AnalyticsAggregator {
 
     // Fetch data from all sources in parallel
     // Primary queue source: Google Sheet via n8n webhook (with fallback)
+    // Also fetch VAPI scheduled calls directly from VAPI API
     // Bookings: From n8n execution data (is_booked flag) - tracks FB ad leads only
     // All data uses midnight-to-midnight AWST boundaries
-    const [n8nExecutions, vapiCalls, separatedCallData, facebookLeads] = await Promise.all([
+    const [n8nExecutions, vapiCalls, separatedCallData, facebookLeads, vapiScheduledCalls] = await Promise.all([
       n8nClient.getCallData(startDate, endDate).catch((err) => {
         console.error('Failed to fetch n8n executions:', err);
         return [];
@@ -236,6 +237,10 @@ export class AnalyticsAggregator {
         console.error('Failed to fetch Facebook leads:', err);
         return [];
       }),
+      vapiClient.getScheduledCalls().catch((err) => {
+        console.error('Failed to fetch VAPI scheduled calls:', err);
+        return [];
+      }),
     ]);
 
     // Combine and aggregate data
@@ -244,8 +249,31 @@ export class AnalyticsAggregator {
     const outcomes = this.calculateOutcomes(vapiCalls, n8nExecutions);
     const recentActivity = this.getRecentActivity(n8nExecutions, vapiCalls);
 
+    // Convert VAPI scheduled calls to QueuedCall format
+    const vapiScheduledAsQueued: QueuedCall[] = vapiScheduledCalls.map(sc => ({
+      id: `vapi-${sc.id}`,
+      phone: sc.phone,
+      leadName: sc.leadName,
+      type: 'outbound' as const,
+      queuedAt: sc.scheduledAt,
+      estimatedCallTime: sc.scheduledAt, // VAPI scheduled calls have their scheduled time
+      priority: 'medium' as const,
+      workflowName: 'VAPI Scheduled',
+      status: sc.status,
+      vapiCallId: sc.id,
+    }));
+
+    // Merge queue data with VAPI scheduled calls
+    // Avoid duplicates by checking if phone already exists in queue
+    const existingPhones = new Set(separatedCallData.queuedCalls.map(c => c.phone));
+    const uniqueVapiScheduled = vapiScheduledAsQueued.filter(c => !existingPhones.has(c.phone));
+
+    console.log(`[Analytics] VAPI scheduled calls: ${vapiScheduledCalls.length}, unique to add: ${uniqueVapiScheduled.length}`);
+
     // Use separated queue data - queued, callbacks, and completed calls
-    const queuedCalls = this.sortQueuedCalls(separatedCallData.queuedCalls);
+    // Merge VAPI scheduled calls with queue data
+    const mergedQueuedCalls = [...separatedCallData.queuedCalls, ...uniqueVapiScheduled];
+    const queuedCalls = this.sortQueuedCalls(mergedQueuedCalls);
     const scheduledCallbacks = this.sortScheduledCallbacks(separatedCallData.scheduledCallbacks);
     const completedCalls = this.sortCompletedCalls(separatedCallData.completedCalls);
 
@@ -496,8 +524,10 @@ export class AnalyticsAggregator {
         return priorityA - priorityB;
       }
 
-      // Then sort by queued time (earliest first)
-      return new Date(a.queuedAt).getTime() - new Date(b.queuedAt).getTime();
+      // Then sort by scheduled time if available (soonest first), otherwise by queued time
+      const timeA = a.estimatedCallTime ? new Date(a.estimatedCallTime).getTime() : new Date(a.queuedAt).getTime();
+      const timeB = b.estimatedCallTime ? new Date(b.estimatedCallTime).getTime() : new Date(b.queuedAt).getTime();
+      return timeA - timeB;
     });
   }
 
