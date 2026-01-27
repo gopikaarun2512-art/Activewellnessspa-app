@@ -56,9 +56,10 @@ export async function GET(request: Request) {
       awstTime: formatInAWST(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       dailyResetTime: '12:00 PM AWST',
       nextResetHour: nowAWST.getHours() >= 12 ? 'Tomorrow 12:00 PM AWST' : 'Today 12:00 PM AWST',
-      apiVersion: '0.1.3-trace',
+      apiVersion: '0.1.4-detailed',
       debug: {
         webhookFetchStatus: queueClient.lastFetchStatus,
+        analyticsDebug: (analyticsAggregator as any).debugInfo,
         queuedCallsCount: dashboardData.queuedCalls.length,
         firstQueuedCall: dashboardData.queuedCalls[0] ? {
           name: dashboardData.queuedCalls[0].leadName,
@@ -66,6 +67,7 @@ export async function GET(request: Request) {
           source: dashboardData.queuedCalls[0].workflowName,
           phone: dashboardData.queuedCalls[0].phone,
           scheduledTime: dashboardData.queuedCalls[0].estimatedCallTime,
+          idPrefix: dashboardData.queuedCalls[0].id.substring(0, 10),
         } : null,
       },
     };
