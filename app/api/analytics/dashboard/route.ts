@@ -56,7 +56,7 @@ export async function GET(request: Request) {
       awstTime: formatInAWST(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       dailyResetTime: '12:00 PM AWST',
       nextResetHour: nowAWST.getHours() >= 12 ? 'Tomorrow 12:00 PM AWST' : 'Today 12:00 PM AWST',
-      apiVersion: '0.1.5-trim-fix',
+      apiVersion: '0.1.6-logging',
       debug: {
         webhookFetchStatus: queueClient.lastFetchStatus,
         analyticsDebug: (analyticsAggregator as any).debugInfo,
