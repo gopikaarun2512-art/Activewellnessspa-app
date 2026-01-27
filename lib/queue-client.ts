@@ -75,10 +75,12 @@ export class QueueClient {
       });
 
       if (!response.ok) {
-        throw new Error(`Webhook error: ${response.statusText}`);
+        console.error('[Queue Client] Webhook returned non-OK status:', response.status, response.statusText);
+        throw new Error(`Webhook error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('[Queue Client] Webhook returned OK, items:', Array.isArray(data) ? data.length : (data?.data?.length || 0));
 
       // Debug: Log raw webhook response including scheduled time fields
       console.log('[Queue Client] Raw webhook response:', {

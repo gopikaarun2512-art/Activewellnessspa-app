@@ -243,6 +243,21 @@ export class AnalyticsAggregator {
       }),
     ]);
 
+    // Debug: Log what data sources returned
+    console.log('[Analytics] Data sources:', {
+      n8nExecutions: n8nExecutions.length,
+      vapiCalls: vapiCalls.length,
+      queuedCalls: separatedCallData.queuedCalls.length,
+      scheduledCallbacks: separatedCallData.scheduledCallbacks.length,
+      completedCalls: separatedCallData.completedCalls.length,
+      vapiScheduledCalls: vapiScheduledCalls.length,
+      sampleQueuedCall: separatedCallData.queuedCalls[0] ? {
+        name: separatedCallData.queuedCalls[0].leadName,
+        priority: separatedCallData.queuedCalls[0].priority,
+        source: separatedCallData.queuedCalls[0].workflowName,
+      } : null,
+    });
+
     // Combine and aggregate data
     const metrics = this.calculateMetrics(n8nExecutions, vapiCalls);
     const callVolume = this.calculateCallVolume(vapiCalls);
