@@ -3,12 +3,44 @@
  * Fetches booking data directly from GymMaster to verify actual bookings
  *
  * API Documentation: https://www.gymmaster.com/gymmaster-reporting-api/
+ * Member Portal API: /portal/api/v1/ and /portal/api/v2/
  */
 
 // GymMaster credentials
 const GYMMASTER_BASE_URL = process.env.GYMMASTER_BASE_URL || '';
 const GYMMASTER_API_KEY_MEMBER = process.env.GYMMASTER_API_KEY_MEMBER || '';
 const GYMMASTER_API_KEY_STAFF = process.env.GYMMASTER_API_KEY_STAFF || '';
+
+// Cache for member data (5 minute TTL)
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const memberCache: Map<string, CacheEntry<GymMasterMember[]>> = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Normalize phone number for comparison
+ * Converts various formats to a consistent format
+ */
+function normalizePhone(phone: string): string {
+  // Remove all non-digit characters
+  let digits = phone.replace(/\D/g, '');
+
+  // Handle Australian numbers
+  // +61 or 61 prefix -> convert to 0
+  if (digits.startsWith('61') && digits.length >= 11) {
+    digits = '0' + digits.slice(2);
+  }
+
+  // Ensure leading 0 for Australian mobile/landline
+  if (digits.length === 9 && !digits.startsWith('0')) {
+    digits = '0' + digits;
+  }
+
+  return digits;
+}
 
 export interface GymMasterBooking {
   id: string;
@@ -39,6 +71,25 @@ export interface GymMasterMember {
   phone?: string;
   membershipStatus: string;
   joinDate?: string;
+}
+
+export interface MemberUpcomingBooking {
+  id: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  serviceName: string;
+  location?: string;
+  staffName?: string;
+}
+
+export interface MemberBookingStatus {
+  isMember: boolean;
+  memberId?: string;
+  memberName?: string;
+  hasBooking: boolean;
+  upcomingBookings: MemberUpcomingBooking[];
+  checkedAt: string;
 }
 
 export class GymMasterClient {
@@ -334,13 +385,285 @@ export class GymMasterClient {
   }
 
   /**
-   * Search for a member by phone or email
+   * Search for a member by phone or email (legacy method - use searchMemberByPhone instead)
    */
   async searchMember(searchTerm: string): Promise<GymMasterMember | null> {
-    // This would require a member search endpoint
-    // For now, return null - can be implemented when API endpoint is confirmed
-    console.log('Member search not yet implemented for:', searchTerm);
+    // Delegate to phone search
+    return this.searchMemberByPhone(searchTerm);
+  }
+
+  /**
+   * Fetch all current members from GymMaster
+   * Uses the Staff API key and caches results for 5 minutes
+   */
+  async fetchAllMembers(forceRefresh = false): Promise<GymMasterMember[]> {
+    const cacheKey = 'all_members';
+
+    // Check cache first
+    if (!forceRefresh) {
+      const cached = memberCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+      }
+    }
+
+    try {
+      // Use the Member Portal API v1 endpoint
+      const response = await this.fetch(
+        `/portal/api/v1/members?api_key=${this.apiKeyStaff}`,
+        { method: 'GET' },
+        true // Use staff key
+      );
+
+      if (!response?.result || !Array.isArray(response.result)) {
+        console.warn('GymMaster members response invalid:', response);
+        return [];
+      }
+
+      // Map API response to our interface
+      const members: GymMasterMember[] = response.result.map((m: any) => ({
+        id: String(m.id || m.memberid || ''),
+        firstName: m.firstname || m.firstName || '',
+        lastName: m.surname || m.lastName || '',
+        email: m.email || undefined,
+        phone: m.phonecell || m.phone || m.phonehome || undefined,
+        membershipStatus: m.membership_status || m.status || 'unknown',
+        joinDate: m.joindate || m.join_date || undefined,
+      }));
+
+      // Cache the results
+      memberCache.set(cacheKey, {
+        data: members,
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      });
+
+      console.log(`GymMaster: Fetched and cached ${members.length} members`);
+      return members;
+    } catch (error) {
+      console.error('Error fetching GymMaster members:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Search for a member by phone number
+   * Normalizes both search phone and member phones for comparison
+   */
+  async searchMemberByPhone(phone: string): Promise<GymMasterMember | null> {
+    if (!phone) return null;
+
+    const normalizedSearch = normalizePhone(phone);
+    if (normalizedSearch.length < 8) {
+      console.warn('Phone number too short for search:', phone);
+      return null;
+    }
+
+    const members = await this.fetchAllMembers();
+
+    // Search for matching phone
+    for (const member of members) {
+      if (member.phone) {
+        const normalizedMember = normalizePhone(member.phone);
+        // Check if either contains the other (partial match)
+        if (
+          normalizedMember === normalizedSearch ||
+          normalizedMember.endsWith(normalizedSearch) ||
+          normalizedSearch.endsWith(normalizedMember)
+        ) {
+          return member;
+        }
+      }
+    }
+
     return null;
+  }
+
+  /**
+   * Login as a member to get an access token
+   * Required for accessing member-specific endpoints like bookings
+   */
+  async loginAsMember(memberId: string): Promise<{ token: string; expires: number } | null> {
+    try {
+      // Login using member ID (requires staff API key)
+      const response = await this.fetch(
+        `/portal/api/v1/login?api_key=${this.apiKeyStaff}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ memberid: parseInt(memberId, 10) }),
+        },
+        true
+      );
+
+      if (!response?.result?.token) {
+        console.warn('GymMaster login failed for member:', memberId);
+        return null;
+      }
+
+      return {
+        token: response.result.token,
+        expires: response.result.expires || 3600,
+      };
+    } catch (error) {
+      console.error('Error logging in as member:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get a member's upcoming bookings
+   * Requires a valid member token (from loginAsMember)
+   */
+  async getMemberUpcomingBookings(token: string): Promise<MemberUpcomingBooking[]> {
+    try {
+      const response = await this.fetch(
+        `/portal/api/v2/member/bookings?api_key=${this.apiKeyMember}&token=${token}`,
+        { method: 'GET' },
+        false // Use member key
+      );
+
+      if (!response) {
+        return [];
+      }
+
+      const bookings: MemberUpcomingBooking[] = [];
+
+      // Handle class bookings
+      if (response.classbookings && Array.isArray(response.classbookings)) {
+        for (const booking of response.classbookings) {
+          bookings.push({
+            id: String(booking.id || ''),
+            day: booking.day || booking.arrival || '',
+            startTime: booking.starttime || booking.start_str || '',
+            endTime: booking.endtime || booking.end_str || '',
+            serviceName: booking.name || booking.classname || 'Class',
+            location: booking.location,
+            staffName: booking.staffname,
+          });
+        }
+      }
+
+      // Handle service bookings
+      if (response.servicebookings && Array.isArray(response.servicebookings)) {
+        for (const booking of response.servicebookings) {
+          bookings.push({
+            id: String(booking.id || ''),
+            day: booking.day || '',
+            startTime: booking.starttime || booking.start_str || '',
+            endTime: booking.endtime || booking.end_str || '',
+            serviceName: booking.servicename || booking.name || 'Service',
+            location: booking.location,
+            staffName: booking.staffname,
+          });
+        }
+      }
+
+      return bookings;
+    } catch (error) {
+      console.error('Error fetching member bookings:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check booking status for a lead by phone number
+   * This is the main method used by the dashboard to verify if a lead has booked
+   */
+  async checkLeadBookingStatus(phone: string): Promise<MemberBookingStatus> {
+    const checkedAt = new Date().toISOString();
+
+    if (!this.isConfigured()) {
+      return {
+        isMember: false,
+        hasBooking: false,
+        upcomingBookings: [],
+        checkedAt,
+      };
+    }
+
+    try {
+      // Step 1: Search for member by phone
+      const member = await this.searchMemberByPhone(phone);
+
+      if (!member) {
+        return {
+          isMember: false,
+          hasBooking: false,
+          upcomingBookings: [],
+          checkedAt,
+        };
+      }
+
+      // Step 2: Login as member to get token
+      const loginResult = await this.loginAsMember(member.id);
+
+      if (!loginResult) {
+        // Member exists but couldn't login - still report as member
+        return {
+          isMember: true,
+          memberId: member.id,
+          memberName: `${member.firstName} ${member.lastName}`.trim(),
+          hasBooking: false,
+          upcomingBookings: [],
+          checkedAt,
+        };
+      }
+
+      // Step 3: Get upcoming bookings
+      const bookings = await this.getMemberUpcomingBookings(loginResult.token);
+
+      return {
+        isMember: true,
+        memberId: member.id,
+        memberName: `${member.firstName} ${member.lastName}`.trim(),
+        hasBooking: bookings.length > 0,
+        upcomingBookings: bookings,
+        checkedAt,
+      };
+    } catch (error) {
+      console.error('Error checking lead booking status:', error);
+      return {
+        isMember: false,
+        hasBooking: false,
+        upcomingBookings: [],
+        checkedAt,
+      };
+    }
+  }
+
+  /**
+   * Batch check booking status for multiple phone numbers
+   * More efficient than calling checkLeadBookingStatus for each
+   */
+  async batchCheckBookingStatus(phones: string[]): Promise<Map<string, MemberBookingStatus>> {
+    const results = new Map<string, MemberBookingStatus>();
+
+    // Pre-fetch all members once
+    await this.fetchAllMembers();
+
+    // Check each phone in parallel (with concurrency limit)
+    const CONCURRENCY = 5;
+    const chunks = [];
+    for (let i = 0; i < phones.length; i += CONCURRENCY) {
+      chunks.push(phones.slice(i, i + CONCURRENCY));
+    }
+
+    for (const chunk of chunks) {
+      const promises = chunk.map(async (phone) => {
+        const status = await this.checkLeadBookingStatus(phone);
+        results.set(normalizePhone(phone), status);
+      });
+      await Promise.all(promises);
+    }
+
+    return results;
+  }
+
+  /**
+   * Clear the member cache (useful for forcing fresh data)
+   */
+  clearCache(): void {
+    memberCache.clear();
+    console.log('GymMaster member cache cleared');
   }
 }
 

@@ -3,8 +3,7 @@ import { vapiClient } from './vapi-client';
 import { facebookLeadsClient } from './facebook-leads-client';
 import { queueClient } from './queue-client';
 import { getCurrentHourInAWST, AWST_OFFSET_MS } from './timezone';
-// GymMaster client available for future use (e.g., displaying total gym bookings separately)
-// import { gymMasterClient, GymMasterBookingSummary } from './gymmaster-client';
+import { gymMasterClient, MemberBookingStatus } from './gymmaster-client';
 import {
   DashboardData,
   DashboardMetrics,
@@ -16,8 +15,37 @@ import {
   CompletedCall,
   VAPICall,
   FacebookLead,
+  PipelineStage,
+  PipelineSummary,
+  PipelineStageSummary,
 } from '@/types/analytics';
 import { subDays } from 'date-fns';
+
+/**
+ * Calculate pipeline stage from journey data
+ * Priority order: booking_confirmed > call_completed > call_pending > lead_submitted
+ */
+function calculatePipelineStage(journey?: FacebookLead['journey']): PipelineStage {
+  if (!journey) return 'lead_submitted';
+
+  // If booked in GymMaster, they're at the final stage
+  if (journey.isBooked) {
+    return 'booking_confirmed';
+  }
+
+  // If they've been contacted and have a call outcome, call is completed
+  if (journey.contactedAt || journey.callOutcome || journey.callSummary) {
+    return 'call_completed';
+  }
+
+  // If they're in queue or scheduled for callback, call is pending
+  if (journey.queuedAt || journey.contactMethod === 'queued' || journey.callbackScheduledAt) {
+    return 'call_pending';
+  }
+
+  // Default: lead just submitted
+  return 'lead_submitted';
+}
 
 export type DateRangeType = 'today' | 'yesterday' | 'last7days' | 'last30days';
 
@@ -227,13 +255,16 @@ export class AnalyticsAggregator {
     );
 
     // Enrich Facebook leads with journey data from VAPI calls and queue
-    const enrichedFacebookLeads = this.enrichFacebookLeadsWithJourney(
+    let enrichedFacebookLeads = this.enrichFacebookLeadsWithJourney(
       facebookLeads,
       vapiCalls,
       separatedCallData.queuedCalls,
       separatedCallData.scheduledCallbacks,
       separatedCallData.completedCalls
     );
+
+    // Check GymMaster booking status for all leads (auto-check on every refresh)
+    enrichedFacebookLeads = await this.checkGymMasterBookings(enrichedFacebookLeads);
 
     return {
       metrics,
@@ -390,6 +421,10 @@ export class AnalyticsAggregator {
         }
       }
 
+      // Calculate pipeline stage based on journey data
+      journey.pipelineStage = calculatePipelineStage(journey);
+      journey.stageUpdatedAt = new Date().toISOString();
+
       // Update lead status based on enriched journey
       // Priority: booked > not_interested > contacted > qualified > new
       let newStatus = lead.status;
@@ -495,6 +530,159 @@ export class AnalyticsAggregator {
     return calls.sort((a, b) => {
       return new Date(b.calledAt).getTime() - new Date(a.calledAt).getTime();
     });
+  }
+
+  /**
+   * Calculate pipeline summary from enriched Facebook leads
+   */
+  calculatePipelineSummary(leads: FacebookLead[]): PipelineSummary {
+    const byStage: Record<PipelineStage, number> = {
+      'lead_submitted': 0,
+      'call_pending': 0,
+      'call_completed': 0,
+      'booking_confirmed': 0,
+    };
+
+    let totalTimeToCall = 0;
+    let callCount = 0;
+    let totalTimeToBooking = 0;
+    let bookingCount = 0;
+
+    leads.forEach(lead => {
+      const stage = lead.journey?.pipelineStage || calculatePipelineStage(lead.journey);
+      byStage[stage]++;
+
+      // Calculate time metrics
+      const leadTime = new Date(lead.createdTime).getTime();
+
+      if (lead.journey?.contactedAt) {
+        const callTime = new Date(lead.journey.contactedAt).getTime();
+        totalTimeToCall += (callTime - leadTime) / 1000; // seconds
+        callCount++;
+      }
+
+      if (lead.journey?.isBooked && lead.journey?.contactedAt) {
+        // Use contacted time as approximation for booking time
+        const bookingTime = new Date(lead.journey.contactedAt).getTime();
+        totalTimeToBooking += (bookingTime - leadTime) / 1000;
+        bookingCount++;
+      }
+    });
+
+    const totalLeads = leads.length;
+    const conversionRate = totalLeads > 0
+      ? (byStage['booking_confirmed'] / totalLeads) * 100
+      : 0;
+
+    const stages: PipelineStageSummary[] = [
+      {
+        stage: 'lead_submitted',
+        count: byStage['lead_submitted'],
+        percentage: totalLeads > 0 ? (byStage['lead_submitted'] / totalLeads) * 100 : 0,
+      },
+      {
+        stage: 'call_pending',
+        count: byStage['call_pending'],
+        percentage: totalLeads > 0 ? (byStage['call_pending'] / totalLeads) * 100 : 0,
+      },
+      {
+        stage: 'call_completed',
+        count: byStage['call_completed'],
+        percentage: totalLeads > 0 ? (byStage['call_completed'] / totalLeads) * 100 : 0,
+      },
+      {
+        stage: 'booking_confirmed',
+        count: byStage['booking_confirmed'],
+        percentage: totalLeads > 0 ? (byStage['booking_confirmed'] / totalLeads) * 100 : 0,
+      },
+    ];
+
+    return {
+      totalLeads,
+      byStage,
+      stages,
+      conversionRate: Number(conversionRate.toFixed(1)),
+      avgTimeToCall: callCount > 0 ? Math.round(totalTimeToCall / callCount) : null,
+      avgTimeToBooking: bookingCount > 0 ? Math.round(totalTimeToBooking / bookingCount) : null,
+    };
+  }
+
+  /**
+   * Check GymMaster booking status for all leads
+   * Updates leads with real-time booking data from GymMaster
+   */
+  async checkGymMasterBookings(leads: FacebookLead[]): Promise<FacebookLead[]> {
+    if (!gymMasterClient.isConfigured()) {
+      console.log('[Analytics] GymMaster not configured, skipping booking check');
+      return leads;
+    }
+
+    // Get phones that need checking (not already confirmed booked)
+    const phonesToCheck = leads
+      .filter(lead => lead.phone && !lead.journey?.isBooked)
+      .map(lead => lead.phone!)
+      .filter((phone, index, arr) => arr.indexOf(phone) === index); // unique
+
+    if (phonesToCheck.length === 0) {
+      return leads;
+    }
+
+    console.log(`[Analytics] Checking GymMaster booking status for ${phonesToCheck.length} leads`);
+
+    try {
+      // Batch check all phones
+      const bookingStatuses = await gymMasterClient.batchCheckBookingStatus(phonesToCheck);
+
+      // Update leads with GymMaster data
+      return leads.map(lead => {
+        if (!lead.phone) return lead;
+
+        const normalizedPhone = this.normalizePhone(lead.phone);
+        const status = bookingStatuses.get(normalizedPhone);
+
+        if (!status) return lead;
+
+        // Update journey with GymMaster data
+        const journey: NonNullable<FacebookLead['journey']> = lead.journey ? { ...lead.journey } : {};
+
+        journey.gymMasterChecked = true;
+        journey.isMember = status.isMember;
+        journey.isBooked = status.hasBooking;
+
+        if (status.memberId) {
+          journey.memberId = status.memberId;
+        }
+
+        if (status.upcomingBookings.length > 0) {
+          journey.bookingDetails = status.upcomingBookings.map(b => ({
+            day: b.day,
+            startTime: b.startTime,
+            serviceName: b.serviceName,
+          }));
+        }
+
+        // Recalculate pipeline stage with new booking data
+        journey.pipelineStage = calculatePipelineStage(journey);
+        journey.stageUpdatedAt = new Date().toISOString();
+
+        // Update lead status if booked
+        let newStatus = lead.status;
+        if (journey.isBooked) {
+          newStatus = 'booked';
+        } else if (journey.isMember && newStatus === 'new') {
+          newStatus = 'qualified';
+        }
+
+        return {
+          ...lead,
+          status: newStatus,
+          journey,
+        };
+      });
+    } catch (error) {
+      console.error('[Analytics] Error checking GymMaster bookings:', error);
+      return leads;
+    }
   }
 
   private calculateMetrics(n8nExecutions: any[], vapiCalls: any[]): DashboardMetrics {

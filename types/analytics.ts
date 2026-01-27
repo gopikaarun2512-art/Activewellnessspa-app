@@ -1,3 +1,25 @@
+// Pipeline stage types for lead tracking
+export type PipelineStage =
+  | 'lead_submitted'     // FB lead received, no action yet
+  | 'call_pending'       // In queue or scheduled for call
+  | 'call_completed'     // Call finished (any outcome)
+  | 'booking_confirmed'; // GymMaster booking confirmed
+
+export interface PipelineStageSummary {
+  stage: PipelineStage;
+  count: number;
+  percentage: number;
+}
+
+export interface PipelineSummary {
+  totalLeads: number;
+  byStage: Record<PipelineStage, number>;
+  stages: PipelineStageSummary[];
+  conversionRate: number; // lead_submitted -> booking_confirmed
+  avgTimeToCall: number | null; // seconds from lead to first call
+  avgTimeToBooking: number | null; // seconds from lead to booking
+}
+
 export interface DashboardMetrics {
   totalCalls: number;
   totalBookings: number;
@@ -149,6 +171,10 @@ export interface FacebookLead {
 
   // Journey tracking fields
   journey?: {
+    // Pipeline stage tracking
+    pipelineStage?: PipelineStage;  // Current stage in the pipeline
+    stageUpdatedAt?: string;        // When the stage was last updated
+
     // Contact method: instant call or queued
     contactMethod?: 'instant' | 'queued';
     contactedAt?: string;           // When the lead was first contacted
@@ -171,6 +197,11 @@ export interface FacebookLead {
     isBooked?: boolean;             // Final booking status from GymMaster
     isMember?: boolean;             // Whether they're already a member
     memberId?: string;              // GymMaster member ID if exists
+    bookingDetails?: {              // Details of upcoming bookings
+      day: string;
+      startTime: string;
+      serviceName: string;
+    }[];
 
     // Attempt tracking
     totalAttempts?: number;         // Total call attempts
