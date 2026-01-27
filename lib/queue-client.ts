@@ -52,6 +52,7 @@ export class QueueClient {
   private webhookUrl: string;
   private useGoogleSheetsFallback: boolean;
   public lastFetchStatus: { status: number; ok: boolean; url: string; error?: string } | null = null;
+  public lastQueueResult: { count: number; source: string; timestamp: string } | null = null;
 
   constructor() {
     this.webhookUrl = `${N8N_WEBHOOK_BASE}${QUEUE_WEBHOOK_PATH}`;
@@ -205,6 +206,7 @@ export class QueueClient {
       // Try n8n webhook first
       const result = await this.getQueueFromWebhook();
       console.log('[Queue Client v2] getQueueFromWebhook() returned', result.length, 'items');
+      this.lastQueueResult = { count: result.length, source: 'webhook', timestamp: new Date().toISOString() };
       return result;
     } catch (webhookError) {
       console.warn('[Queue Client v2] Webhook failed:', webhookError);
@@ -212,7 +214,9 @@ export class QueueClient {
       if (this.useGoogleSheetsFallback) {
         try {
           console.log('[Queue Client v2] Trying Google Sheets fallback...');
-          return await this.getQueueFromGoogleSheets();
+          const result = await this.getQueueFromGoogleSheets();
+          this.lastQueueResult = { count: result.length, source: 'google-sheets', timestamp: new Date().toISOString() };
+          return result;
         } catch (sheetsError) {
           console.error('[Queue Client v2] Google Sheets fallback also failed:', sheetsError);
         }
@@ -220,6 +224,7 @@ export class QueueClient {
 
       // Return empty array if both fail
       console.log('[Queue Client v2] All data sources failed, returning empty array');
+      this.lastQueueResult = { count: 0, source: 'failed-all', timestamp: new Date().toISOString() };
       return [];
     }
   }
