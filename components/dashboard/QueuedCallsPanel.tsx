@@ -202,13 +202,24 @@ export default function QueuedCallsPanel({ queuedCalls, onClearQueue }: QueuedCa
                     {getTypeBadge(call.type)}
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
                     <span className="flex items-center gap-1">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       Queued {formatShortTimeAWST(call.queuedAt)}
                     </span>
+                    {call.estimatedCallTime && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
+                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          Scheduled {formatShortTimeAWST(call.estimatedCallTime)}
+                        </span>
+                      </>
+                    )}
                     {call.workflowName && (
                       <>
                         <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
@@ -219,13 +230,12 @@ export default function QueuedCallsPanel({ queuedCalls, onClearQueue }: QueuedCa
                     )}
                   </div>
 
-                  {call.priority && (
-                    <div className="mt-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getPriorityColor(call.priority)}`}>
-                        {call.priority.charAt(0).toUpperCase() + call.priority.slice(1)} Priority
-                      </span>
-                    </div>
-                  )}
+                  {/* Always show priority tag */}
+                  <div className="mt-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getPriorityColor(call.priority || 'medium')}`}>
+                      {(call.priority || 'medium').charAt(0).toUpperCase() + (call.priority || 'medium').slice(1)} Priority
+                    </span>
+                  </div>
                 </div>
 
                 {/* Status Indicator */}
