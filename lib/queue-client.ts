@@ -100,8 +100,17 @@ export class QueueClient {
       // Handle both array and wrapped response
       const items = Array.isArray(data) ? data : data.data || [];
 
+      // Normalize priority value to valid options
+      const normalizePriority = (p: string | undefined): 'high' | 'medium' | 'low' => {
+        if (!p) return 'medium';
+        const lower = p.toLowerCase();
+        if (lower === 'high' || lower === 'instant' || lower === 'urgent') return 'high';
+        if (lower === 'low') return 'low';
+        return 'medium';
+      };
+
       // The webhook already returns transformed data, just ensure types are correct
-      return items.map((item: any) => ({
+      const mappedItems = items.map((item: any) => ({
         id: item.id || item.queue_id || '',
         phone: String(item.phone || item.phone_e164 || ''),
         leadName: item.leadName || [item.firstName, item.lastName].filter(Boolean).join(' ') || 'Unknown',
@@ -109,7 +118,7 @@ export class QueueClient {
         queuedAt: item.queuedAt || item.created_at || new Date().toISOString(),
         // Map scheduled time from multiple possible field names
         estimatedCallTime: item.estimatedCallTime || item.scheduled_call_time || item.execution_time || item.earliest_call_at || undefined,
-        priority: item.priority || 'medium',
+        priority: normalizePriority(item.priority),
         workflowName: item.workflowName || item.source || undefined,
         // Extended fields
         status: item.status,
@@ -122,6 +131,20 @@ export class QueueClient {
         batchPosition: item.batchPosition || item.batch_position,
         callbackReason: item.callbackReason || item.callback_reason,
       } as QueuedCall & Record<string, any>));
+
+      // Deduplicate by phone number (keep the most recent entry)
+      const seenPhones = new Map<string, QueuedCall>();
+      for (const item of mappedItems) {
+        const existingItem = seenPhones.get(item.phone);
+        if (!existingItem || new Date(item.queuedAt) > new Date(existingItem.queuedAt)) {
+          seenPhones.set(item.phone, item);
+        }
+      }
+
+      const dedupedItems = Array.from(seenPhones.values());
+      console.log(`[Queue Client] Deduped ${mappedItems.length} -> ${dedupedItems.length} items`);
+
+      return dedupedItems;
     } catch (error) {
       console.error('Error fetching queue from webhook:', error);
       throw error;
