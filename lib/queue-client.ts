@@ -1,7 +1,8 @@
 import { QueuedCall, ScheduledCallback, CompletedCall } from '@/types/analytics';
 
-const N8N_WEBHOOK_BASE = process.env.NEXT_PUBLIC_N8N_WEBHOOK_BASE || '';
-const QUEUE_WEBHOOK_PATH = process.env.NEXT_PUBLIC_QUEUE_WEBHOOK_PATH || '/call-queue-api';
+// Trim newlines and whitespace from env vars (common issue with .env files)
+const N8N_WEBHOOK_BASE = (process.env.NEXT_PUBLIC_N8N_WEBHOOK_BASE || '').trim();
+const QUEUE_WEBHOOK_PATH = (process.env.NEXT_PUBLIC_QUEUE_WEBHOOK_PATH || '/call-queue-api').trim();
 
 // Google Sheets API fallback (optional)
 const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || '';
