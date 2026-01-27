@@ -249,33 +249,87 @@ export class AnalyticsAggregator {
     const outcomes = this.calculateOutcomes(vapiCalls, n8nExecutions);
     const recentActivity = this.getRecentActivity(n8nExecutions, vapiCalls);
 
-    // Convert VAPI scheduled calls to QueuedCall format
-    const vapiScheduledAsQueued: QueuedCall[] = vapiScheduledCalls.map(sc => ({
-      id: `vapi-${sc.id}`,
-      phone: sc.phone,
-      leadName: sc.leadName,
-      type: 'outbound' as const,
-      queuedAt: sc.scheduledAt,
-      estimatedCallTime: sc.scheduledAt, // VAPI scheduled calls have their scheduled time
-      priority: 'medium' as const,
-      workflowName: 'VAPI Scheduled',
-      status: sc.status,
-      vapiCallId: sc.id,
-    }));
+    // Get set of phone numbers that have been called (from VAPI completed calls)
+    // Normalize phone numbers for comparison
+    const calledPhones = new Set<string>();
+    const vapiCallsByPhone = new Map<string, VAPICall>();
+
+    for (const call of vapiCalls) {
+      if (call.phoneNumber) {
+        const normalizedPhone = this.normalizePhone(call.phoneNumber);
+        calledPhones.add(normalizedPhone);
+        // Keep the most recent call for each phone
+        const existing = vapiCallsByPhone.get(normalizedPhone);
+        if (!existing || new Date(call.startedAt) > new Date(existing.startedAt)) {
+          vapiCallsByPhone.set(normalizedPhone, call);
+        }
+      }
+    }
+
+    console.log(`[Analytics] VAPI completed calls phones: ${calledPhones.size}`);
+
+    // Filter queue entries - remove any that have already been called
+    const stillQueuedCalls: QueuedCall[] = [];
+    const movedToCompleted: CompletedCall[] = [];
+
+    for (const queuedCall of separatedCallData.queuedCalls) {
+      const normalizedPhone = this.normalizePhone(queuedCall.phone);
+      const vapiCall = vapiCallsByPhone.get(normalizedPhone);
+
+      if (vapiCall) {
+        // This queue entry has been called - move to completed
+        movedToCompleted.push({
+          id: queuedCall.id,
+          phone: queuedCall.phone,
+          leadName: queuedCall.leadName,
+          type: queuedCall.type,
+          calledAt: vapiCall.startedAt,
+          callOutcome: vapiCall.outcome || vapiCall.status || 'completed',
+          callDuration: vapiCall.duration,
+          vapiCallId: vapiCall.id,
+          summary: vapiCall.summary,
+          email: queuedCall.email,
+        });
+      } else {
+        // Not yet called - keep in queue
+        stillQueuedCalls.push(queuedCall);
+      }
+    }
+
+    console.log(`[Analytics] Queue filter: ${separatedCallData.queuedCalls.length} -> ${stillQueuedCalls.length} still queued, ${movedToCompleted.length} moved to completed`);
+
+    // Convert VAPI scheduled calls to QueuedCall format (only if not already called)
+    const vapiScheduledAsQueued: QueuedCall[] = vapiScheduledCalls
+      .filter(sc => !calledPhones.has(this.normalizePhone(sc.phone))) // Filter out already called
+      .map(sc => ({
+        id: `vapi-${sc.id}`,
+        phone: sc.phone,
+        leadName: sc.leadName,
+        type: 'outbound' as const,
+        queuedAt: sc.scheduledAt,
+        estimatedCallTime: sc.scheduledAt, // VAPI scheduled calls have their scheduled time
+        priority: 'medium' as const,
+        workflowName: 'VAPI Scheduled',
+        status: sc.status,
+        vapiCallId: sc.id,
+      }));
 
     // Merge queue data with VAPI scheduled calls
     // Avoid duplicates by checking if phone already exists in queue
-    const existingPhones = new Set(separatedCallData.queuedCalls.map(c => c.phone));
+    const existingPhones = new Set(stillQueuedCalls.map(c => c.phone));
     const uniqueVapiScheduled = vapiScheduledAsQueued.filter(c => !existingPhones.has(c.phone));
 
     console.log(`[Analytics] VAPI scheduled calls: ${vapiScheduledCalls.length}, unique to add: ${uniqueVapiScheduled.length}`);
 
     // Use separated queue data - queued, callbacks, and completed calls
     // Merge VAPI scheduled calls with queue data
-    const mergedQueuedCalls = [...separatedCallData.queuedCalls, ...uniqueVapiScheduled];
+    const mergedQueuedCalls = [...stillQueuedCalls, ...uniqueVapiScheduled];
     const queuedCalls = this.sortQueuedCalls(mergedQueuedCalls);
     const scheduledCallbacks = this.sortScheduledCallbacks(separatedCallData.scheduledCallbacks);
-    const completedCalls = this.sortCompletedCalls(separatedCallData.completedCalls);
+
+    // Merge completed calls from queue separation + moved from queue
+    const allCompletedCalls = [...separatedCallData.completedCalls, ...movedToCompleted];
+    const completedCalls = this.sortCompletedCalls(allCompletedCalls);
 
     // Sort VAPI calls by time (most recent first) for call summaries display
     const sortedVapiCalls = [...vapiCalls].sort((a, b) =>
