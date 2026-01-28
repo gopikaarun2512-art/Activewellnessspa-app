@@ -179,6 +179,7 @@ export interface FacebookLead {
     contactMethod?: 'instant' | 'queued';
     contactedAt?: string;           // When the lead was first contacted
     queuedAt?: string;              // When the lead was added to queue (if queued)
+    scheduledCallTime?: string;     // Estimated time when call will be made
 
     // Callback tracking
     callbackRequested?: boolean;

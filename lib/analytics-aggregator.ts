@@ -430,9 +430,15 @@ export class AnalyticsAggregator {
       // Track if lead was originally queued (for showing queued -> called transition)
       const wasQueued = queuedCall !== undefined || journey.queuedAt !== undefined;
 
-      // If there's a queued call record, capture the queue time
-      if (queuedCall && !journey.queuedAt) {
-        journey.queuedAt = queuedCall.queuedAt;
+      // If there's a queued call record, capture the queue time and scheduled call time
+      if (queuedCall) {
+        if (!journey.queuedAt) {
+          journey.queuedAt = queuedCall.queuedAt;
+        }
+        // Add scheduled call time if available
+        if (queuedCall.estimatedCallTime && !journey.scheduledCallTime) {
+          journey.scheduledCallTime = queuedCall.estimatedCallTime;
+        }
       }
 
       // Check if the lead has been called (completed call or VAPI calls exist)

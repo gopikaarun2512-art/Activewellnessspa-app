@@ -353,6 +353,17 @@ export default function FacebookLeadsPanel({ facebookLeads }: FacebookLeadsPanel
                             </div>
                           )}
 
+                          {/* Call Scheduled (if scheduled time available) */}
+                          {lead.journey.scheduledCallTime && !lead.journey.contactedAt && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <div className="absolute left-0 w-2 h-2 rounded-full bg-blue-500"></div>
+                              <span className="text-gray-500 dark:text-gray-400">Call scheduled:</span>
+                              <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                {formatShortTimeAWST(lead.journey.scheduledCallTime)}
+                              </span>
+                            </div>
+                          )}
+
                           {/* Called (if contacted) */}
                           {lead.journey.contactedAt && (
                             <div className="flex items-center gap-2 text-xs">
