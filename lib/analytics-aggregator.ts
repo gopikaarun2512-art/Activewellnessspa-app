@@ -243,23 +243,13 @@ export class AnalyticsAggregator {
       }),
     ]);
 
-    // Debug: Log what data sources returned (for API response)
-    (this as any).debugInfo = {
+    // Log data source counts for debugging
+    console.log('[Analytics] Data sources:', {
       n8nExecutions: n8nExecutions.length,
       vapiCalls: vapiCalls.length,
-      separatedCallData: {
-        queuedCalls: separatedCallData.queuedCalls.length,
-        scheduledCallbacks: separatedCallData.scheduledCallbacks.length,
-        completedCalls: separatedCallData.completedCalls.length,
-      },
+      queuedCalls: separatedCallData.queuedCalls.length,
       vapiScheduledCalls: vapiScheduledCalls.length,
-      sampleQueuedFromSeparated: separatedCallData.queuedCalls[0] ? {
-        name: separatedCallData.queuedCalls[0].leadName,
-        priority: separatedCallData.queuedCalls[0].priority,
-        source: separatedCallData.queuedCalls[0].workflowName,
-      } : null,
-    };
-    console.log('[Analytics] Data sources:', (this as any).debugInfo);
+    });
 
     // Combine and aggregate data
     const metrics = this.calculateMetrics(n8nExecutions, vapiCalls);

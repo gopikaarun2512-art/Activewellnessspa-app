@@ -78,40 +78,17 @@ export class QueueClient {
       });
 
       const fetchUrl = `${this.webhookUrl}${cacheBuster}`;
-      console.log('[Queue Client v2] Webhook response status:', response.status, response.ok, 'url:', fetchUrl);
       this.lastFetchStatus = { status: response.status, ok: response.ok, url: fetchUrl };
 
       if (!response.ok) {
         const errorBody = await response.text();
-        console.error('[Queue Client v2] ERROR: Webhook returned non-OK status:', response.status, 'body:', errorBody.substring(0, 200));
         this.lastFetchStatus.error = errorBody.substring(0, 100);
-        // Explicitly throw to ensure getQueue catches this
-        const error = new Error(`Webhook error: ${response.status} ${response.statusText}`);
-        console.error('[Queue Client v2] Throwing error:', error.message);
-        throw error;
+        console.warn('[Queue Client] Webhook returned error:', response.status);
+        throw new Error(`Webhook error: ${response.status} ${response.statusText}`);
       }
 
-      console.log('[Queue Client v2] Response is OK, parsing JSON...');
-
       const data = await response.json();
-      console.log('[Queue Client] Webhook returned OK, items:', Array.isArray(data) ? data.length : (data?.data?.length || 0), 'sample:', JSON.stringify((Array.isArray(data) ? data : data?.data)?.[0] || {}).substring(0, 200));
-
-      // Debug: Log raw webhook response including scheduled time fields
-      console.log('[Queue Client] Raw webhook response:', {
-        itemCount: Array.isArray(data) ? data.length : (data.data?.length || 0),
-        sampleData: (Array.isArray(data) ? data : data.data || []).slice(0, 3).map((item: any) => ({
-          name: item.leadName || item.firstName,
-          status: item.status,
-          callOutcome: item.callOutcome || item.call_outcome,
-          priority: item.priority,
-          scheduledFields: {
-            estimatedCallTime: item.estimatedCallTime,
-            scheduled_call_time: item.scheduled_call_time,
-            execution_time: item.execution_time,
-            earliest_call_at: item.earliest_call_at,
-          },
-        })),
-      });
+      console.log('[Queue Client] Webhook returned', Array.isArray(data) ? data.length : (data?.data?.length || 0), 'items');
 
       // Handle both array and wrapped response
       const items = Array.isArray(data) ? data : data.data || [];
@@ -201,29 +178,26 @@ export class QueueClient {
    * Get queue data with n8n webhook as primary, Google Sheets as fallback
    */
   async getQueue(): Promise<QueuedCall[]> {
-    console.log('[Queue Client v2] getQueue() called, useGoogleSheetsFallback:', this.useGoogleSheetsFallback);
     try {
       // Try n8n webhook first
       const result = await this.getQueueFromWebhook();
-      console.log('[Queue Client v2] getQueueFromWebhook() returned', result.length, 'items');
       this.lastQueueResult = { count: result.length, source: 'webhook', timestamp: new Date().toISOString() };
       return result;
     } catch (webhookError) {
-      console.warn('[Queue Client v2] Webhook failed:', webhookError);
+      console.warn('[Queue Client] Webhook failed, trying fallback');
 
       if (this.useGoogleSheetsFallback) {
         try {
-          console.log('[Queue Client v2] Trying Google Sheets fallback...');
           const result = await this.getQueueFromGoogleSheets();
           this.lastQueueResult = { count: result.length, source: 'google-sheets', timestamp: new Date().toISOString() };
+          console.log('[Queue Client] Using Google Sheets fallback:', result.length, 'items');
           return result;
         } catch (sheetsError) {
-          console.error('[Queue Client v2] Google Sheets fallback also failed:', sheetsError);
+          console.error('[Queue Client] Google Sheets fallback also failed');
         }
       }
 
       // Return empty array if both fail
-      console.log('[Queue Client v2] All data sources failed, returning empty array');
       this.lastQueueResult = { count: 0, source: 'failed-all', timestamp: new Date().toISOString() };
       return [];
     }
