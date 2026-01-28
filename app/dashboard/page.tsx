@@ -12,12 +12,14 @@ import QueuedCallsPanel from '@/components/dashboard/QueuedCallsPanel';
 import ScheduledCallbacksPanel from '@/components/dashboard/ScheduledCallbacksPanel';
 import CompletedCallsPanel from '@/components/dashboard/CompletedCallsPanel';
 import FacebookLeadsPanel from '@/components/dashboard/FacebookLeadsPanel';
+import BookedLeadsPanel from '@/components/dashboard/BookedLeadsPanel';
+import LeadPipelineOverview from '@/components/dashboard/LeadPipelineOverview';
 import TodaysScheduleSidebar from '@/components/dashboard/TodaysScheduleSidebar';
 import { DateRange } from '@/components/dashboard/DateRangeFilter';
 import { ToastProvider, useToast } from '@/components/ui/ToastProvider';
 import { exportActivityToCSV } from '@/lib/export-csv';
 import { saveLeads } from '@/lib/lead-persistence';
-import type { DashboardData } from '@/types/analytics';
+import type { DashboardData, PipelineStage } from '@/types/analytics';
 import type { GamificationData } from '@/types/gamification';
 import { format } from 'date-fns';
 
@@ -73,6 +75,7 @@ function DashboardContent() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange>('today');
+  const [selectedPipelineStage, setSelectedPipelineStage] = useState<PipelineStage | null>(null);
   const { showToast } = useToast();
 
   // Track current AWST date to detect midnight rollover
@@ -267,19 +270,32 @@ function DashboardContent() {
     );
   }, [data.dashboard?.recentActivity, searchQuery]);
 
-  // Filter Facebook leads based on search query
+  // Filter Facebook leads based on search query and pipeline stage
   const filteredFacebookLeads = useMemo(() => {
     if (!data.dashboard?.facebookLeads) return [];
-    if (!searchQuery) return data.dashboard.facebookLeads;
 
-    const query = searchQuery.toLowerCase();
-    return data.dashboard.facebookLeads.filter(
-      (lead) =>
-        lead.name.toLowerCase().includes(query) ||
-        lead.phone?.includes(query) ||
-        lead.email?.toLowerCase().includes(query)
-    );
-  }, [data.dashboard?.facebookLeads, searchQuery]);
+    let leads = data.dashboard.facebookLeads;
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      leads = leads.filter(
+        (lead) =>
+          lead.name.toLowerCase().includes(query) ||
+          lead.phone?.includes(query) ||
+          lead.email?.toLowerCase().includes(query)
+      );
+    }
+
+    // Filter by pipeline stage
+    if (selectedPipelineStage) {
+      leads = leads.filter(
+        (lead) => lead.journey?.pipelineStage === selectedPipelineStage
+      );
+    }
+
+    return leads;
+  }, [data.dashboard?.facebookLeads, searchQuery, selectedPipelineStage]);
 
   // Handle export
   const handleExport = useCallback(() => {
@@ -406,7 +422,21 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* Facebook Leads Panel */}
+              {/* Lead Pipeline Overview - Visual funnel of lead stages */}
+              <div className="stagger-item">
+                <LeadPipelineOverview
+                  leads={data.dashboard.facebookLeads}
+                  selectedStage={selectedPipelineStage}
+                  onStageSelect={setSelectedPipelineStage}
+                />
+              </div>
+
+              {/* Booked Leads Panel - Shows who has booked with details */}
+              <div className="stagger-item">
+                <BookedLeadsPanel facebookLeads={filteredFacebookLeads} />
+              </div>
+
+              {/* Facebook Leads Panel - Full lead journey tracking */}
               <div className="stagger-item">
                 <FacebookLeadsPanel facebookLeads={filteredFacebookLeads} />
               </div>

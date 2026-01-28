@@ -425,6 +425,35 @@ export default function FacebookLeadsPanel({ facebookLeads }: FacebookLeadsPanel
                             </div>
                           )}
 
+                          {/* Booking Details - Show service, day, and time */}
+                          {lead.journey.bookingDetails && lead.journey.bookingDetails.length > 0 && (
+                            <div className="mt-2 ml-0 space-y-1.5">
+                              <div className="text-xs font-semibold text-wellness-700 dark:text-wellness-400 flex items-center gap-1">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Upcoming Booking{lead.journey.bookingDetails.length > 1 ? 's' : ''}:
+                              </div>
+                              {lead.journey.bookingDetails.map((booking, idx) => (
+                                <div key={idx} className="flex items-center gap-2 text-xs bg-wellness-50 dark:bg-wellness-900/20 rounded-lg px-3 py-2 border border-wellness-200 dark:border-wellness-700">
+                                  <div className="w-6 h-6 rounded-full bg-wellness-100 dark:bg-wellness-800 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-3.5 h-3.5 text-wellness-600 dark:text-wellness-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                                      {booking.serviceName}
+                                    </div>
+                                    <div className="text-gray-600 dark:text-gray-300">
+                                      {booking.day} at {booking.startTime}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {/* Call Duration */}
                           {lead.journey.callDuration !== undefined && lead.journey.callDuration > 0 && (
                             <div className="flex items-center gap-2 text-xs">

@@ -53,9 +53,9 @@ export async function GET(request: Request) {
       gamification: gamificationData,
       timestamp: new Date().toISOString(),
       awstTime: formatInAWST(new Date(), 'yyyy-MM-dd HH:mm:ss'),
-      dailyResetTime: '12:00 PM AWST',
-      nextResetHour: nowAWST.getHours() >= 12 ? 'Tomorrow 12:00 PM AWST' : 'Today 12:00 PM AWST',
-          };
+      dailyResetTime: '12:00 AM AWST (Midnight)',
+      nextResetHour: 'Next midnight AWST',
+    };
 
     // Update cache with date range key
     cacheStore.set(cacheKey, { data: response, time: now });
