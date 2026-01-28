@@ -85,11 +85,22 @@ export class VAPIClient {
       'assistant-did-not-answer': 'no_answer',
     };
 
-    // Map status
-    let status: 'completed' | 'failed' | 'no-answer' | 'voicemail' = 'completed';
-    if (raw.endedReason === 'customer-did-not-answer' || raw.endedReason === 'no-answer') status = 'no-answer';
-    else if (raw.endedReason === 'voicemail') status = 'voicemail';
-    else if (raw.status === 'failed' || raw.status === 'error') status = 'failed';
+    // Map status - IMPORTANT: Check for scheduled/queued FIRST before defaulting to completed
+    let status: 'completed' | 'failed' | 'no-answer' | 'voicemail' | 'scheduled' | 'queued' = 'completed';
+    const rawStatus = (raw.status || '').toLowerCase();
+
+    // Check if this is a scheduled or queued call (not yet executed)
+    if (rawStatus === 'scheduled') {
+      status = 'scheduled';
+    } else if (rawStatus === 'queued') {
+      status = 'queued';
+    } else if (raw.endedReason === 'customer-did-not-answer' || raw.endedReason === 'no-answer') {
+      status = 'no-answer';
+    } else if (raw.endedReason === 'voicemail') {
+      status = 'voicemail';
+    } else if (rawStatus === 'failed' || rawStatus === 'error') {
+      status = 'failed';
+    }
 
     // Extract outcome - check structuredOutputs first (where VAPI Status Handler looks)
     // Then check analysis.structuredData, then use endedReason mapping
@@ -209,6 +220,7 @@ export class VAPIClient {
       endedAt: raw.endedAt,
       leadName,
       summary,
+      scheduledAt: raw.scheduledAt, // For scheduled calls
     };
   }
 

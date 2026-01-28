@@ -147,12 +147,13 @@ export interface VAPICall {
   type: 'inbound' | 'outbound';
   phoneNumber: string;
   duration: number;
-  status: 'completed' | 'failed' | 'no-answer' | 'voicemail';
+  status: 'completed' | 'failed' | 'no-answer' | 'voicemail' | 'scheduled' | 'queued';
   outcome?: string; // booking_link_sent, not_interested, no_answer, voicemail, busy, wrong_number, callback_requested
   startedAt: string;
   endedAt?: string;
   leadName?: string;
   summary?: string; // Call summary from VAPI artifact
+  scheduledAt?: string; // For scheduled calls, when the call is scheduled to happen
 }
 
 export interface FacebookLead {

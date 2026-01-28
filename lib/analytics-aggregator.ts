@@ -257,12 +257,24 @@ export class AnalyticsAggregator {
     const outcomes = this.calculateOutcomes(vapiCalls, n8nExecutions);
     const recentActivity = this.getRecentActivity(n8nExecutions, vapiCalls);
 
-    // Get set of phone numbers that have been called (from VAPI completed calls)
+    // Separate VAPI calls into completed vs scheduled
+    // IMPORTANT: Scheduled/queued calls should NOT be treated as completed calls
+    const completedVapiCalls = vapiCalls.filter(call =>
+      call.status !== 'scheduled' && call.status !== 'queued'
+    );
+    const scheduledVapiCalls = vapiCalls.filter(call =>
+      call.status === 'scheduled' || call.status === 'queued'
+    );
+
+    console.log(`[Analytics] VAPI calls breakdown: ${completedVapiCalls.length} completed, ${scheduledVapiCalls.length} scheduled/queued`);
+
+    // Get set of phone numbers that have been actually called (from VAPI completed calls only)
     // Normalize phone numbers for comparison
     const calledPhones = new Set<string>();
     const vapiCallsByPhone = new Map<string, VAPICall>();
+    const scheduledCallsByPhone = new Map<string, VAPICall>();
 
-    for (const call of vapiCalls) {
+    for (const call of completedVapiCalls) {
       if (call.phoneNumber) {
         const normalizedPhone = this.normalizePhone(call.phoneNumber);
         calledPhones.add(normalizedPhone);
@@ -274,7 +286,15 @@ export class AnalyticsAggregator {
       }
     }
 
-    console.log(`[Analytics] VAPI completed calls phones: ${calledPhones.size}`);
+    // Build map of scheduled calls by phone (for updating lead journey)
+    for (const call of scheduledVapiCalls) {
+      if (call.phoneNumber) {
+        const normalizedPhone = this.normalizePhone(call.phoneNumber);
+        scheduledCallsByPhone.set(normalizedPhone, call);
+      }
+    }
+
+    console.log(`[Analytics] VAPI completed calls phones: ${calledPhones.size}, scheduled calls phones: ${scheduledCallsByPhone.size}`);
 
     // Filter queue entries - remove any that have already been called
     const stillQueuedCalls: QueuedCall[] = [];
@@ -339,15 +359,18 @@ export class AnalyticsAggregator {
     const allCompletedCalls = [...separatedCallData.completedCalls, ...movedToCompleted];
     const completedCalls = this.sortCompletedCalls(allCompletedCalls);
 
-    // Sort VAPI calls by time (most recent first) for call summaries display
-    const sortedVapiCalls = [...vapiCalls].sort((a, b) =>
+    // Sort completed VAPI calls by time (most recent first) for call summaries display
+    // Note: We only show completed calls in the summaries, not scheduled ones
+    const sortedVapiCalls = [...completedVapiCalls].sort((a, b) =>
       new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     );
 
     // Enrich Facebook leads with journey data from VAPI calls and queue
+    // IMPORTANT: Pass only completed VAPI calls, not scheduled ones
     let enrichedFacebookLeads = this.enrichFacebookLeadsWithJourney(
       facebookLeads,
-      vapiCalls,
+      completedVapiCalls, // Only completed calls, not scheduled
+      scheduledVapiCalls, // Scheduled calls separately
       separatedCallData.queuedCalls,
       separatedCallData.scheduledCallbacks,
       separatedCallData.completedCalls
@@ -376,25 +399,33 @@ export class AnalyticsAggregator {
    */
   private enrichFacebookLeadsWithJourney(
     leads: FacebookLead[],
-    vapiCalls: VAPICall[],
+    completedVapiCalls: VAPICall[],
+    scheduledVapiCalls: VAPICall[],
     queuedCalls: QueuedCall[],
     scheduledCallbacks: ScheduledCallback[],
     completedCalls: CompletedCall[]
   ): FacebookLead[] {
     // Create phone-to-data maps for quick lookup
     const vapiCallsByPhone = new Map<string, VAPICall[]>();
+    const scheduledVapiByPhone = new Map<string, VAPICall>();
     const queuedByPhone = new Map<string, QueuedCall>();
     const callbacksByPhone = new Map<string, ScheduledCallback>();
     const completedByPhone = new Map<string, CompletedCall>();
 
-    // Index VAPI calls by phone
-    vapiCalls.forEach(call => {
+    // Index completed VAPI calls by phone
+    completedVapiCalls.forEach(call => {
       const phone = this.normalizePhone(call.phoneNumber);
       if (phone) {
         const existing = vapiCallsByPhone.get(phone) || [];
         existing.push(call);
         vapiCallsByPhone.set(phone, existing);
       }
+    });
+
+    // Index scheduled VAPI calls by phone (for scheduledCallTime)
+    scheduledVapiCalls.forEach(call => {
+      const phone = this.normalizePhone(call.phoneNumber);
+      if (phone) scheduledVapiByPhone.set(phone, call);
     });
 
     // Index queue data by phone
@@ -420,6 +451,7 @@ export class AnalyticsAggregator {
 
       // Get matching data
       const matchingVapiCalls = vapiCallsByPhone.get(phone) || [];
+      const scheduledVapiCall = scheduledVapiByPhone.get(phone);
       const queuedCall = queuedByPhone.get(phone);
       const scheduledCallback = callbacksByPhone.get(phone);
       const completedCall = completedByPhone.get(phone);
@@ -428,20 +460,35 @@ export class AnalyticsAggregator {
       const journey: NonNullable<FacebookLead['journey']> = lead.journey ? { ...lead.journey } : {};
 
       // Track if lead was originally queued (for showing queued -> called transition)
-      const wasQueued = queuedCall !== undefined || journey.queuedAt !== undefined;
+      const wasQueued = queuedCall !== undefined || scheduledVapiCall !== undefined || journey.queuedAt !== undefined;
 
       // If there's a queued call record, capture the queue time and scheduled call time
       if (queuedCall) {
         if (!journey.queuedAt) {
           journey.queuedAt = queuedCall.queuedAt;
         }
-        // Add scheduled call time if available
+        // Add scheduled call time if available from queue
         if (queuedCall.estimatedCallTime && !journey.scheduledCallTime) {
           journey.scheduledCallTime = queuedCall.estimatedCallTime;
         }
       }
 
-      // Check if the lead has been called (completed call or VAPI calls exist)
+      // If there's a scheduled VAPI call, capture the scheduled time
+      // This takes priority as it's the actual VAPI scheduled time
+      if (scheduledVapiCall) {
+        journey.contactMethod = 'queued';
+        if (!journey.queuedAt) {
+          journey.queuedAt = scheduledVapiCall.startedAt; // Use createdAt as queuedAt
+        }
+        // Set scheduled call time from VAPI (this is the actual scheduled time)
+        if (scheduledVapiCall.scheduledAt) {
+          journey.scheduledCallTime = scheduledVapiCall.scheduledAt;
+        }
+        journey.vapiCallId = scheduledVapiCall.id;
+      }
+
+      // Check if the lead has been actually called (completed call or completed VAPI calls exist)
+      // Note: scheduledVapiCall does NOT count as "hasBeenCalled"
       const hasBeenCalled = completedCall !== undefined || matchingVapiCalls.length > 0;
 
       // Determine contact method based on queue status and call status
