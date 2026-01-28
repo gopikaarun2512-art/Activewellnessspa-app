@@ -1,7 +1,7 @@
 import { n8nClient } from './n8n-client';
 import { vapiClient } from './vapi-client';
 import { facebookLeadsClient } from './facebook-leads-client';
-import { queueClient } from './queue-client';
+import { queueClient, N8NScheduledCall } from './queue-client';
 import { getCurrentHourInAWST, AWST_OFFSET_MS } from './timezone';
 import { gymMasterClient, MemberBookingStatus } from './gymmaster-client';
 import {
@@ -218,9 +218,10 @@ export class AnalyticsAggregator {
     // Fetch data from all sources in parallel
     // Primary queue source: Google Sheet via n8n webhook (with fallback)
     // Also fetch VAPI scheduled calls directly from VAPI API
+    // Also fetch n8n workflow 2 scheduled calls (name + scheduledAt)
     // Bookings: From n8n execution data (is_booked flag) - tracks FB ad leads only
     // All data uses midnight-to-midnight AWST boundaries
-    const [n8nExecutions, vapiCalls, separatedCallData, facebookLeads, vapiScheduledCalls] = await Promise.all([
+    const [n8nExecutions, vapiCalls, separatedCallData, facebookLeads, vapiScheduledCalls, n8nScheduledCalls] = await Promise.all([
       n8nClient.getCallData(startDate, endDate).catch((err) => {
         console.error('Failed to fetch n8n executions:', err);
         return [];
@@ -241,6 +242,10 @@ export class AnalyticsAggregator {
         console.error('Failed to fetch VAPI scheduled calls:', err);
         return [];
       }),
+      queueClient.getScheduledCallsFromN8N().catch((err) => {
+        console.error('Failed to fetch n8n scheduled calls:', err);
+        return [];
+      }),
     ]);
 
     // Log data source counts for debugging
@@ -249,6 +254,7 @@ export class AnalyticsAggregator {
       vapiCalls: vapiCalls.length,
       queuedCalls: separatedCallData.queuedCalls.length,
       vapiScheduledCalls: vapiScheduledCalls.length,
+      n8nScheduledCalls: n8nScheduledCalls.length,
     });
 
     // Combine and aggregate data
@@ -367,13 +373,15 @@ export class AnalyticsAggregator {
 
     // Enrich Facebook leads with journey data from VAPI calls and queue
     // IMPORTANT: Pass only completed VAPI calls, not scheduled ones
+    // Also pass n8n scheduled calls for name-based matching
     let enrichedFacebookLeads = this.enrichFacebookLeadsWithJourney(
       facebookLeads,
       completedVapiCalls, // Only completed calls, not scheduled
       scheduledVapiCalls, // Scheduled calls separately
       separatedCallData.queuedCalls,
       separatedCallData.scheduledCallbacks,
-      separatedCallData.completedCalls
+      separatedCallData.completedCalls,
+      n8nScheduledCalls // n8n workflow 2 scheduled calls (name + scheduledAt)
     );
 
     // Check GymMaster booking status for all leads (auto-check on every refresh)
@@ -396,6 +404,7 @@ export class AnalyticsAggregator {
   /**
    * Enrich Facebook leads with journey data from VAPI calls and queue
    * Correlates leads by phone number to build complete journey timeline
+   * Also uses n8n scheduled calls (matched by name) for scheduledCallTime
    */
   private enrichFacebookLeadsWithJourney(
     leads: FacebookLead[],
@@ -403,7 +412,8 @@ export class AnalyticsAggregator {
     scheduledVapiCalls: VAPICall[],
     queuedCalls: QueuedCall[],
     scheduledCallbacks: ScheduledCallback[],
-    completedCalls: CompletedCall[]
+    completedCalls: CompletedCall[],
+    n8nScheduledCalls: N8NScheduledCall[] = []
   ): FacebookLead[] {
     // Create phone-to-data maps for quick lookup
     const vapiCallsByPhone = new Map<string, VAPICall[]>();
@@ -443,6 +453,18 @@ export class AnalyticsAggregator {
       const phone = this.normalizePhone(call.phone);
       if (phone) completedByPhone.set(phone, call);
     });
+
+    // Create name-to-scheduledAt map from n8n scheduled calls (for name-based matching)
+    // This is used when phone-based matching fails
+    const n8nScheduledByName = new Map<string, string>();
+    n8nScheduledCalls.forEach(sc => {
+      if (sc.name && sc.scheduledAt) {
+        // Normalize name for matching (lowercase, trim)
+        const normalizedName = sc.name.toLowerCase().trim();
+        n8nScheduledByName.set(normalizedName, sc.scheduledAt);
+      }
+    });
+    console.log(`[Analytics] N8N scheduled calls by name: ${n8nScheduledByName.size} entries`);
 
     // Enrich each lead
     return leads.map(lead => {
@@ -485,6 +507,24 @@ export class AnalyticsAggregator {
           journey.scheduledCallTime = scheduledVapiCall.scheduledAt;
         }
         journey.vapiCallId = scheduledVapiCall.id;
+      }
+
+      // Check n8n scheduled calls by name (if we still don't have scheduledCallTime)
+      // This is a fallback when phone-based matching fails
+      if (!journey.scheduledCallTime && lead.name) {
+        const normalizedLeadName = lead.name.toLowerCase().trim();
+        const n8nScheduledAt = n8nScheduledByName.get(normalizedLeadName);
+        if (n8nScheduledAt) {
+          journey.scheduledCallTime = n8nScheduledAt;
+          // If we found a scheduled call, mark as queued
+          if (!journey.contactMethod) {
+            journey.contactMethod = 'queued';
+          }
+          if (!journey.queuedAt) {
+            journey.queuedAt = lead.createdTime;
+          }
+          console.log(`[Analytics] Matched n8n scheduled call by name: ${lead.name} -> ${n8nScheduledAt}`);
+        }
       }
 
       // Check if the lead has been actually called (completed call or completed VAPI calls exist)

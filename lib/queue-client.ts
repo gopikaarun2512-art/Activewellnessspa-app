@@ -3,6 +3,7 @@ import { QueuedCall, ScheduledCallback, CompletedCall } from '@/types/analytics'
 // Trim newlines and whitespace from env vars (common issue with .env files)
 const N8N_WEBHOOK_BASE = (process.env.NEXT_PUBLIC_N8N_WEBHOOK_BASE || '').trim();
 const QUEUE_WEBHOOK_PATH = (process.env.NEXT_PUBLIC_QUEUE_WEBHOOK_PATH || '/call-queue-api').trim();
+const SCHEDULED_CALLS_WEBHOOK_PATH = (process.env.NEXT_PUBLIC_SCHEDULED_CALLS_WEBHOOK_PATH || '/vapi-scheduled-calls').trim();
 
 // Google Sheets API fallback (optional)
 const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY || '';
@@ -48,15 +49,68 @@ interface QueueSheetRow {
   upcoming_booking_count?: number;
 }
 
+// Scheduled calls from n8n workflow (workflow 2 output)
+export interface N8NScheduledCall {
+  name: string;
+  scheduledAt: string;
+  phone?: string;
+}
+
 export class QueueClient {
   private webhookUrl: string;
+  private scheduledCallsUrl: string;
   private useGoogleSheetsFallback: boolean;
   public lastFetchStatus: { status: number; ok: boolean; url: string; error?: string } | null = null;
   public lastQueueResult: { count: number; source: string; timestamp: string } | null = null;
 
   constructor() {
     this.webhookUrl = `${N8N_WEBHOOK_BASE}${QUEUE_WEBHOOK_PATH}`;
+    this.scheduledCallsUrl = `${N8N_WEBHOOK_BASE}${SCHEDULED_CALLS_WEBHOOK_PATH}`;
     this.useGoogleSheetsFallback = Boolean(GOOGLE_SHEETS_API_KEY && QUEUE_SPREADSHEET_ID);
+  }
+
+  /**
+   * Fetch scheduled calls from n8n workflow 2
+   * Returns list of scheduled calls with name and scheduledAt
+   */
+  async getScheduledCallsFromN8N(): Promise<N8NScheduledCall[]> {
+    try {
+      if (!N8N_WEBHOOK_BASE) {
+        console.warn('[Queue Client] N8N_WEBHOOK_BASE not configured');
+        return [];
+      }
+
+      const cacheBuster = `?_t=${Date.now()}`;
+      const response = await fetch(`${this.scheduledCallsUrl}${cacheBuster}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        console.warn('[Queue Client] Scheduled calls webhook returned error:', response.status);
+        return [];
+      }
+
+      const data = await response.json();
+      console.log('[Queue Client] N8N Scheduled calls:', Array.isArray(data) ? data.length : 0, 'items');
+
+      // Handle both array and wrapped response
+      const items = Array.isArray(data) ? data : data.data || [];
+
+      return items.map((item: any) => ({
+        name: item.name || '',
+        scheduledAt: item.scheduledAt || '',
+        phone: item.phone || item.phoneNumber || undefined,
+      }));
+    } catch (error) {
+      console.error('[Queue Client] Error fetching scheduled calls from n8n:', error);
+      return [];
+    }
   }
 
   /**
