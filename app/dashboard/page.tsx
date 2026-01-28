@@ -13,6 +13,7 @@ import ScheduledCallbacksPanel from '@/components/dashboard/ScheduledCallbacksPa
 import CompletedCallsPanel from '@/components/dashboard/CompletedCallsPanel';
 import FacebookLeadsPanel from '@/components/dashboard/FacebookLeadsPanel';
 import LeadPipelineOverview from '@/components/dashboard/LeadPipelineOverview';
+import LeadPipelineDetail from '@/components/dashboard/LeadPipelineDetail';
 import TodaysScheduleSidebar from '@/components/dashboard/TodaysScheduleSidebar';
 import { DateRange } from '@/components/dashboard/DateRangeFilter';
 import { ToastProvider, useToast } from '@/components/ui/ToastProvider';
@@ -422,14 +423,21 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* Lead Pipeline Overview + Facebook Leads Panel */}
+              {/* Lead Pipeline Overview + Lead Pipeline Detail */}
               <div className="stagger-item">
                 <LeadPipelineOverview
                   leads={data.dashboard.facebookLeads}
                   selectedStage={selectedPipelineStage}
                   onStageSelect={setSelectedPipelineStage}
                 />
-                <FacebookLeadsPanel facebookLeads={filteredFacebookLeads} />
+              </div>
+
+              {/* Lead Pipeline Detail - Shows each lead's journey timeline */}
+              <div className="stagger-item">
+                <LeadPipelineDetail
+                  leads={filteredFacebookLeads}
+                  selectedStage={selectedPipelineStage}
+                />
               </div>
 
               {/* Detailed Call Summaries - shows all VAPI calls with summaries */}
